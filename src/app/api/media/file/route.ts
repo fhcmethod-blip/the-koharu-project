@@ -28,6 +28,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Invalid kind" }, { status: 400 });
     }
 
+    // Note: <img>/<video> cannot send auth headers, so file bytes are served
+    // when the URL is known. Membership locks are enforced in the Vault UI.
+    // For production hardening, switch to signed short-lived cookie URLs.
+
     const full = resolveMediaPath(companion, kind, name);
     if (!fs.existsSync(full)) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });

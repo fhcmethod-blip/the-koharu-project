@@ -19,30 +19,34 @@ export function VaultGrid() {
             className="group overflow-hidden rounded-2xl border border-card-border bg-card transition hover:border-accent/40"
           >
             <div
-              className={`relative aspect-[4/5] bg-gradient-to-br ${item.gradient} ${
-                unlocked ? "" : "overflow-hidden"
-              }`}
+              className={`relative aspect-[4/5] bg-gradient-to-br ${item.gradient}`}
             >
-              {!unlocked && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 p-4 text-center backdrop-blur-md">
-                  <span className="text-2xl">🔒</span>
+              {!unlocked ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 p-4 text-center backdrop-blur-md">
+                  <span className="text-2xl" aria-hidden>
+                    🔒
+                  </span>
                   <p className="mt-2 text-sm font-medium">{item.lockedPreview}</p>
                   <p className="mt-1 text-xs text-muted">
                     Needs {tierLabels[item.tierRequired]}
                   </p>
                 </div>
-              )}
-              {unlocked && (
-                <div className="absolute inset-0 flex items-end bg-gradient-to-t from-black/70 to-transparent p-4">
-                  <span className="badge bg-white/15 text-white">
-                    {item.type === "video" ? `▶ ${item.duration ?? "Video"}` : "Photo set"}
+              ) : (
+                <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/75 via-black/20 to-transparent p-4">
+                  <span className="badge w-fit bg-white/15 text-white">
+                    {item.type === "video"
+                      ? `▶ ${item.duration ?? "Video"}`
+                      : "Photo set"}
                   </span>
+                  <p className="mt-2 text-xs text-white/70">Open gallery →</p>
                 </div>
               )}
             </div>
             <div className="p-4">
               <div className="flex items-start justify-between gap-2">
-                <h3 className="font-medium group-hover:text-accent-soft">{item.title}</h3>
+                <h3 className="font-medium group-hover:text-accent-soft">
+                  {item.title}
+                </h3>
                 <span className="badge shrink-0 bg-white/5 text-muted">
                   {tierLabels[item.tierRequired]}
                 </span>

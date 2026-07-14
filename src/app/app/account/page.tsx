@@ -34,8 +34,19 @@ export default function AccountPage() {
           <p className="prose-muted mt-2 text-xs">
             {isOwner
               ? "Your email is on the owner list — VIP is locked on for vault + all features."
-              : "Switch tiers to test vault locks, or unlock everything below."}
+              : "Free: chat. Plus: IRL photos. VIP: photos + videos. Switch tiers to test locks, or unlock everything below."}
           </p>
+          <ul className="prose-muted mt-2 list-inside list-disc text-xs">
+            <li>
+              <strong className="text-foreground/80">Free</strong> — chat + locked vault previews
+            </li>
+            <li>
+              <strong className="text-foreground/80">Plus</strong> — all vault photos
+            </li>
+            <li>
+              <strong className="text-foreground/80">VIP</strong> — photos + exclusive videos
+            </li>
+          </ul>
           {!isOwner && (
             <div className="mt-3 flex flex-wrap gap-2">
               {tiers.map((t) => (

@@ -62,4 +62,8 @@ export type VaultItem = {
   duration?: string;
   gradient: string;
   lockedPreview: string;
+  /** Companion folder for real files */
+  companionId?: string;
+  /** Which media bucket to pull from */
+  mediaKind?: "library" | "videos" | "generated";
 };

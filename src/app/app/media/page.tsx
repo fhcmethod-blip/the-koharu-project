@@ -1,9 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { characters } from "@/lib/characters";
+import {
+  localVaultDelete,
+  localVaultList,
+  localVaultSave,
+} from "@/lib/vault-local-store";
 
 type MediaItem = {
   id: string;
@@ -14,6 +20,7 @@ type MediaItem = {
   url: string;
   size: number;
   mtime: number;
+  source?: "server" | "local";
 };
 
 type Tab = "library" | "videos" | "generated";
@@ -44,23 +51,58 @@ export default function MediaManagerPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/media/list?companion=${encodeURIComponent(companion)}&kind=all`,
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "List failed");
+      let library: MediaItem[] = [];
+      let videos: MediaItem[] = [];
+      let generated: MediaItem[] = [];
+
+      try {
+        const res = await fetch(
+          `/api/media/list?companion=${encodeURIComponent(companion)}&kind=all`,
+        );
+        const data = await res.json();
+        if (res.ok) {
+          library = (data.items?.library || []).map((x: MediaItem) => ({
+            ...x,
+            source: "server" as const,
+          }));
+          videos = (data.items?.videos || []).map((x: MediaItem) => ({
+            ...x,
+            source: "server" as const,
+          }));
+          generated = (data.items?.generated || []).map((x: MediaItem) => ({
+            ...x,
+            source: "server" as const,
+          }));
+        }
+      } catch {
+        /* server media unavailable (common on Vercel) */
+      }
+
+      try {
+        const local = await localVaultList(companion, "all");
+        const byName = (arr: MediaItem[]) => new Set(arr.map((a) => a.name));
+        const libNames = byName(library);
+        const vidNames = byName(videos);
+        const genNames = byName(generated);
+        for (const item of local) {
+          const row: MediaItem = { ...item, source: "local" };
+          if (item.kind === "library" && !libNames.has(item.name)) library.push(row);
+          if (item.kind === "videos" && !vidNames.has(item.name)) videos.push(row);
+          if (item.kind === "generated" && !genNames.has(item.name))
+            generated.push(row);
+        }
+      } catch {
+        /* idb unavailable */
+      }
+
       setCounts({
-        library: data.items?.library?.length || 0,
-        videos: data.items?.videos?.length || 0,
-        generated: data.items?.generated?.length || 0,
+        library: library.length,
+        videos: videos.length,
+        generated: generated.length,
       });
       const bucket =
-        tab === "library"
-          ? data.items?.library
-          : tab === "videos"
-            ? data.items?.videos
-            : data.items?.generated;
-      setItems(bucket || []);
+        tab === "library" ? library : tab === "videos" ? videos : generated;
+      setItems(bucket);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load media");
     } finally {
@@ -89,34 +131,67 @@ export default function MediaManagerPage() {
     setUploading(true);
     setMessage(null);
     setError(null);
+    const kind =
+      tab === "generated" ? "library" : tab === "videos" ? "videos" : "library";
     try {
+      // Try server disk first (works on PC / local Next)
       const form = new FormData();
       form.set("companion", companion);
-      form.set(
-        "kind",
-        tab === "generated" ? "library" : tab === "videos" ? "videos" : "library",
-      );
+      form.set("kind", kind);
       for (const f of files) form.append("files", f);
 
-      const res = await fetch("/api/media/upload", {
-        method: "POST",
-        headers,
-        body: form,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
-
-      const n = data.count || 0;
-      const fail = data.failed?.length || 0;
-      setMessage(
-        `Uploaded ${n} file${n === 1 ? "" : "s"}${fail ? ` · ${fail} failed` : ""}`,
-      );
-      if (fail && data.failed?.[0]) {
-        setError(data.failed.map((f: { name: string; error: string }) => `${f.name}: ${f.error}`).join("; "));
+      let serverCount = 0;
+      let serverFailed = 0;
+      try {
+        const res = await fetch("/api/media/upload", {
+          method: "POST",
+          headers,
+          body: form,
+        });
+        const data = await res.json();
+        if (res.ok) {
+          serverCount = data.count || 0;
+          serverFailed = data.failed?.length || 0;
+        } else {
+          throw new Error(data.error || "server upload failed");
+        }
+      } catch {
+        // Fallback: IndexedDB (works on Vercel / any browser)
+        let localCount = 0;
+        const errs: string[] = [];
+        for (const f of files) {
+          try {
+            await localVaultSave(companion, kind, f);
+            localCount += 1;
+          } catch (e) {
+            errs.push(
+              `${f.name}: ${e instanceof Error ? e.message : "failed"}`,
+            );
+          }
+        }
+        if (!localCount) {
+          throw new Error(errs[0] || "Upload failed on server and device");
+        }
+        setMessage(
+          `Saved ${localCount} file${localCount === 1 ? "" : "s"} in this browser (vault device storage)`,
+        );
+        if (errs.length) setError(errs.join("; "));
+        const onlyVideo =
+          files.length > 0 &&
+          files.every((f) => /\.(mp4|webm|mov|m4v|mkv)$/i.test(f.name));
+        if (onlyVideo) setTab("videos");
+        await refresh();
+        return;
       }
-      // Jump to videos tab if only videos uploaded
+
+      setMessage(
+        `Uploaded ${serverCount} file${serverCount === 1 ? "" : "s"} to server${
+          serverFailed ? ` · ${serverFailed} failed` : ""
+        }`,
+      );
       const onlyVideo =
-        files.length > 0 && files.every((f) => /\.(mp4|webm|mov|m4v|mkv)$/i.test(f.name));
+        files.length > 0 &&
+        files.every((f) => /\.(mp4|webm|mov|m4v|mkv)$/i.test(f.name));
       if (onlyVideo) setTab("videos");
       await refresh();
     } catch (e) {
@@ -130,12 +205,16 @@ export default function MediaManagerPage() {
     if (!confirm(`Delete ${item.name}?`)) return;
     setError(null);
     try {
-      const res = await fetch(
-        `/api/media/file?companion=${encodeURIComponent(item.companionId)}&kind=${item.kind}&name=${encodeURIComponent(item.name)}`,
-        { method: "DELETE", headers },
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Delete failed");
+      if (item.source === "local") {
+        await localVaultDelete(item.id);
+      } else {
+        const res = await fetch(
+          `/api/media/file?companion=${encodeURIComponent(item.companionId)}&kind=${item.kind}&name=${encodeURIComponent(item.name)}`,
+          { method: "DELETE", headers },
+        );
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Delete failed");
+      }
       if (selected?.id === item.id) setSelected(null);
       setMessage(`Deleted ${item.name}`);
       await refresh();
@@ -168,9 +247,16 @@ export default function MediaManagerPage() {
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Media Manager</h1>
           <p className="prose-muted mt-1 text-sm">
-            Add images &amp; videos for the vault and chat. Files stay on this PC
-            under <code className="text-accent-soft">media/</code>.
+            Add IRL images &amp; videos for the vault. On your PC they save under{" "}
+            <code className="text-accent-soft">media/</code>; on the cloud site they
+            save in this browser so the vault still works.
           </p>
+          <Link
+            href="/app/vault"
+            className="mt-2 inline-block text-xs text-accent-soft hover:underline"
+          >
+            Open IRL Vault →
+          </Link>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-xs text-muted">Companion</label>

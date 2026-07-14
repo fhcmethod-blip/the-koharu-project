@@ -1,33 +1,145 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { VaultGrid } from "@/components/VaultGrid";
+import { VaultLightbox, type LightboxItem } from "@/components/VaultLightbox";
 import { useAuth } from "@/lib/auth";
-import { tierLabels } from "@/lib/vault";
+import { characters } from "@/lib/characters";
+import {
+  canViewMedia,
+  mediaTierRequired,
+  tierBlurb,
+  tierLabels,
+} from "@/lib/vault";
+import {
+  localVaultList,
+  type LocalVaultItem,
+} from "@/lib/vault-local-store";
 
 type MediaFile = {
   id: string;
   name: string;
   url: string;
   mediaType?: string;
+  kind?: string;
+  source?: string;
+  size?: number;
 };
 
 export default function VaultPage() {
   const { user, isOwner } = useAuth();
+  const tier = user?.tier ?? "free";
+  const [companion, setCompanion] = useState("koharu");
   const [photos, setPhotos] = useState<MediaFile[]>([]);
   const [videos, setVideos] = useState<MediaFile[]>([]);
-  const unlocked = user?.tier === "plus" || user?.tier === "vip" || false;
+  const [loading, setLoading] = useState(true);
+  const [storageNote, setStorageNote] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{
+    items: LightboxItem[];
+    index: number;
+  } | null>(null);
+
+  const canPhotos = canViewMedia(tier, "library");
+  const canVideos = canViewMedia(tier, "videos");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      let serverPhotos: MediaFile[] = [];
+      let serverVideos: MediaFile[] = [];
+      let serverOk = false;
+
+      try {
+        const res = await fetch(
+          `/api/media/list?companion=${encodeURIComponent(companion)}&kind=all`,
+          {
+            headers: {
+              "x-user-email": user?.email || "",
+              "x-user-tier": user?.tier || "free",
+            },
+          },
+        );
+        const d = await res.json();
+        if (res.ok) {
+          serverOk = true;
+          serverPhotos = d.items?.library || [];
+          serverVideos = d.items?.videos || [];
+        }
+      } catch {
+        /* offline / vercel empty */
+      }
+
+      let local: LocalVaultItem[] = [];
+      try {
+        local = await localVaultList(companion, "all");
+      } catch {
+        local = [];
+      }
+
+      const localPhotos = local.filter((i) => i.kind === "library");
+      const localVideos = local.filter((i) => i.kind === "videos");
+
+      // Prefer server files; merge local that aren't duplicates by name
+      const photoNames = new Set(serverPhotos.map((p) => p.name));
+      const videoNames = new Set(serverVideos.map((v) => v.name));
+      const mergedPhotos = [
+        ...serverPhotos,
+        ...localPhotos.filter((p) => !photoNames.has(p.name)),
+      ];
+      const mergedVideos = [
+        ...serverVideos,
+        ...localVideos.filter((v) => !videoNames.has(v.name)),
+      ];
+
+      setPhotos(mergedPhotos);
+      setVideos(mergedVideos);
+
+      if (!serverOk && local.length === 0) {
+        setStorageNote(
+          "No media on this host yet. On Vercel, uploads save in this browser (Media Manager). On your PC, files go to media/koharu/.",
+        );
+      } else if (!serverOk && local.length > 0) {
+        setStorageNote(
+          "Showing vault files saved in this browser (cloud host has no permanent disk).",
+        );
+      } else if (serverOk && local.length > 0) {
+        setStorageNote(
+          `Server media + ${local.length} local browser file(s).`,
+        );
+      } else {
+        setStorageNote(null);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [companion, user?.email, user?.tier]);
 
   useEffect(() => {
-    fetch("/api/media/list?companion=koharu&kind=all")
-      .then((r) => r.json())
-      .then((d) => {
-        setPhotos(d.items?.library || []);
-        setVideos(d.items?.videos || []);
-      })
-      .catch(() => {});
-  }, []);
+    void load();
+  }, [load]);
+
+  const photoItems: LightboxItem[] = useMemo(
+    () =>
+      photos.map((p) => ({
+        id: p.id,
+        name: p.name,
+        url: p.url,
+        mediaType: "image" as const,
+      })),
+    [photos],
+  );
+
+  const videoItems: LightboxItem[] = useMemo(
+    () =>
+      videos.map((v) => ({
+        id: v.id,
+        name: v.name,
+        url: v.url,
+        mediaType: "video" as const,
+      })),
+    [videos],
+  );
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
@@ -35,11 +147,23 @@ export default function VaultPage() {
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">IRL Vault</h1>
           <p className="prose-muted mt-2 max-w-xl text-sm">
-            Koharu&apos;s photos and videos. Upload via Media Manager — they appear
-            here for members.
+            Real photos &amp; videos of your companions. Locked by membership —
+            Free teasers, Plus for photos, VIP for video.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <select
+            className="input-field !w-auto !py-2 text-sm"
+            value={companion}
+            onChange={(e) => setCompanion(e.target.value)}
+            aria-label="Companion"
+          >
+            {characters.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
           {(isOwner || user?.tier === "vip") && (
             <Link href="/app/media" className="btn-primary !py-2 text-sm">
               Manage media
@@ -50,38 +174,87 @@ export default function VaultPage() {
             <p className="font-semibold text-gold">
               {user ? tierLabels[user.tier] : "Free"}
             </p>
+            <p className="text-[11px] text-muted">
+              {user ? tierBlurb[user.tier] : tierBlurb.free}
+            </p>
           </div>
         </div>
       </div>
 
-      <section className="mt-10">
-        <h2 className="text-xl font-semibold">Photos</h2>
-        <p className="prose-muted text-sm">
-          {photos.length
-            ? `${photos.length} photo${photos.length === 1 ? "" : "s"}`
-            : "No photos yet"}
-        </p>
+      {/* Tier banner */}
+      {!canPhotos && (
+        <div className="mt-6 rounded-2xl border border-gold/30 bg-gold/10 px-4 py-3 text-sm">
+          <p className="font-medium text-gold">Photos locked</p>
+          <p className="prose-muted mt-1">
+            Upgrade to <strong>Plus</strong> or <strong>VIP</strong> to open IRL
+            photo sets.{" "}
+            <Link href="/app/account" className="text-accent-soft underline">
+              Account
+            </Link>
+          </p>
+        </div>
+      )}
+      {canPhotos && !canVideos && (
+        <div className="mt-6 rounded-2xl border border-accent/30 bg-accent/10 px-4 py-3 text-sm">
+          <p className="font-medium text-accent-soft">Videos are VIP</p>
+          <p className="prose-muted mt-1">
+            You can view photos. Video clips need VIP.{" "}
+            <Link href="/app/account" className="underline">
+              Upgrade
+            </Link>
+          </p>
+        </div>
+      )}
 
-        {photos.length === 0 ? (
+      {storageNote && (
+        <p className="prose-muted mt-4 text-xs">{storageNote}</p>
+      )}
+
+      {/* Photos */}
+      <section className="mt-10">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-xl font-semibold">Photos</h2>
+            <p className="prose-muted text-sm">
+              Requires {tierLabels[mediaTierRequired("library")]}
+              {photos.length ? ` · ${photos.length} file(s)` : ""}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="text-xs text-muted hover:text-foreground"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {loading ? (
+          <p className="mt-4 text-sm text-muted">Loading vault…</p>
+        ) : photos.length === 0 ? (
           <div className="mt-4 rounded-2xl border border-dashed border-card-border bg-card/40 p-8 text-center">
-            <p className="font-medium">Add photos</p>
+            <p className="font-medium">No photos yet</p>
             <p className="prose-muted mt-2 text-sm">
-              Use{" "}
+              Owner: upload in{" "}
               <Link href="/app/media" className="text-accent-soft hover:underline">
                 Media Manager
               </Link>{" "}
               or drop files into{" "}
-              <code className="text-accent-soft">media/koharu/library/</code>
+              <code className="text-accent-soft">media/{companion}/library/</code>
             </p>
           </div>
         ) : (
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {photos.map((img) => (
-              <div
+            {photos.map((img, i) => (
+              <button
                 key={img.id}
-                className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-card-border bg-card"
+                type="button"
+                onClick={() => {
+                  if (canPhotos) setLightbox({ items: photoItems, index: i });
+                }}
+                className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-card-border bg-card text-left"
               >
-                {unlocked ? (
+                {canPhotos ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={img.url}
@@ -90,62 +263,101 @@ export default function VaultPage() {
                     loading="lazy"
                   />
                 ) : (
-                  <div className="flex h-full flex-col items-center justify-center bg-gradient-to-br from-rose-900/50 to-black p-3 text-center">
+                  <div className="flex h-full flex-col items-center justify-center bg-gradient-to-br from-rose-950/90 via-fuchsia-950/70 to-black p-3 text-center">
                     <span className="text-xl">🔒</span>
-                    <p className="mt-2 text-xs text-muted">Plus / VIP</p>
+                    <p className="mt-2 text-xs text-muted">
+                      {tierLabels[mediaTierRequired("library")]}
+                    </p>
                   </div>
                 )}
-              </div>
+                {img.source === "local" && canPhotos && (
+                  <span className="absolute left-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white/80">
+                    device
+                  </span>
+                )}
+              </button>
             ))}
           </div>
         )}
       </section>
 
+      {/* Videos */}
       <section className="mt-12">
         <h2 className="text-xl font-semibold">Videos</h2>
         <p className="prose-muted text-sm">
-          {videos.length
-            ? `${videos.length} video${videos.length === 1 ? "" : "s"}`
-            : "No videos yet"}
+          Requires {tierLabels[mediaTierRequired("videos")]}
+          {videos.length ? ` · ${videos.length} file(s)` : ""}
         </p>
 
-        {videos.length === 0 ? (
+        {loading ? null : videos.length === 0 ? (
           <div className="mt-4 rounded-2xl border border-dashed border-card-border bg-card/40 p-6 text-center text-sm text-muted">
             Upload MP4/WEBM in Media Manager → Videos
           </div>
         ) : (
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            {videos.map((vid) => (
+            {videos.map((vid, i) => (
               <div
                 key={vid.id}
                 className="overflow-hidden rounded-2xl border border-card-border bg-card"
               >
-                {unlocked ? (
-                  <video
-                    src={vid.url}
-                    controls
-                    className="aspect-video w-full bg-black"
-                    preload="metadata"
-                  />
+                {canVideos ? (
+                  <button
+                    type="button"
+                    className="block w-full"
+                    onClick={() =>
+                      setLightbox({ items: videoItems, index: i })
+                    }
+                  >
+                    <video
+                      src={vid.url}
+                      className="aspect-video w-full bg-black object-cover"
+                      preload="metadata"
+                      muted
+                      playsInline
+                    />
+                  </button>
                 ) : (
-                  <div className="flex aspect-video items-center justify-center bg-black/60 text-muted">
-                    🔒 VIP video
+                  <div className="flex aspect-video flex-col items-center justify-center bg-gradient-to-br from-violet-950/80 to-black text-center">
+                    <span className="text-2xl">🔒</span>
+                    <p className="mt-2 text-sm text-muted">
+                      {tierLabels[mediaTierRequired("videos")]} video
+                    </p>
+                    <Link
+                      href="/app/account"
+                      className="mt-3 text-xs text-accent-soft underline"
+                    >
+                      Upgrade membership
+                    </Link>
                   </div>
                 )}
-                <p className="truncate px-3 py-2 text-xs text-muted">{vid.name}</p>
+                <p className="truncate px-3 py-2 text-xs text-muted">
+                  {vid.name}
+                </p>
               </div>
             ))}
           </div>
         )}
       </section>
 
+      {/* Featured sets */}
       <section className="mt-12">
         <h2 className="text-xl font-semibold">Featured sets</h2>
-        <p className="prose-muted mt-1 text-sm">Curated collection labels</p>
+        <p className="prose-muted mt-1 text-sm">
+          Curated collections — open a set to browse unlocked media
+        </p>
         <div className="mt-6">
           <VaultGrid />
         </div>
       </section>
+
+      {lightbox && (
+        <VaultLightbox
+          items={lightbox.items}
+          index={lightbox.index}
+          onClose={() => setLightbox(null)}
+          onChange={(i) => setLightbox({ ...lightbox, index: i })}
+        />
+      )}
     </div>
   );
 }
