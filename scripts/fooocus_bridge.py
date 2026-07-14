@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-Fooocus bridge for The Koharu Project.
+Fooocus bridge for The Koharu Project (public-tunnel ready).
 
-Connects to the running Fooocus Gradio UI (default http://127.0.0.1:7865)
-and exposes REST on :8888 for the Next.js site.
+Listens on :8888 and talks to Fooocus Gradio UI (:7865).
 
   GET  /health
-  POST /v1/generation/text-to-image
+  POST /v1/generation/text-to-image   (sync — long)
+  POST /v1/jobs                       (async start)
+  GET  /v1/jobs/{id}                  (poll)
+
+Auth (recommended when exposed via Cloudflare):
+  Header: x-bridge-secret: <FOOOCUS_BRIDGE_SECRET>
 """
 
 from __future__ import annotations
@@ -16,12 +20,14 @@ import base64
 import copy
 import json
 import os
+import threading
 import time
 import traceback
+import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
@@ -33,11 +39,12 @@ FOOOCUS_OUTPUTS = Path(
         r"D:\Fooocus_win64_2-5-0\Fooocus_win64_2-5-0\Fooocus\outputs",
     )
 )
+BRIDGE_SECRET = os.environ.get("FOOOCUS_BRIDGE_SECRET", "").strip()
 DEFAULTS_PATH = Path(__file__).with_name("fooocus_fn67_defaults.json")
 FN_GET_TASK = 67
 FN_GENERATE = 68
 
-app = FastAPI(title="Koharu Fooocus Bridge", version="1.1.0")
+app = FastAPI(title="Koharu Fooocus Bridge", version="1.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,6 +54,16 @@ app.add_middleware(
 
 _client = None
 _defaults: list[Any] | None = None
+_jobs: dict[str, dict[str, Any]] = {}
+_jobs_lock = threading.Lock()
+_gen_lock = threading.Lock()  # Fooocus is single-GPU; serialize gens
+
+
+def require_secret(x_bridge_secret: str | None = Header(default=None)):
+    if not BRIDGE_SECRET:
+        return
+    if (x_bridge_secret or "") != BRIDGE_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid bridge secret")
 
 
 def load_defaults() -> list[Any]:
@@ -84,13 +101,6 @@ def normalize_aspect(aspect: str | None, fallback: str) -> str:
         return fallback
     if "×" in aspect or "<span" in aspect:
         return aspect
-    a = aspect.replace(" ", "").replace("x", "*").replace("X", "*")
-    if "*" in a:
-        w, h = a.split("*", 1)
-        prefix = f"{w}×{h}"
-        if fallback.startswith(prefix):
-            return fallback
-        return fallback  # keep exact Fooocus radio option
     return fallback
 
 
@@ -116,92 +126,173 @@ class GenBody(BaseModel):
     async_process: bool = False
 
 
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if request.url.path in ("/health", "/", "/docs", "/openapi.json"):
+        return await call_next(request)
+    if BRIDGE_SECRET:
+        secret = request.headers.get("x-bridge-secret") or request.query_params.get(
+            "secret"
+        )
+        if secret != BRIDGE_SECRET:
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
 @app.get("/health")
 @app.get("/")
 def health():
     try:
-        get_client()
+        # don't force client connect if UI down
+        ui_ok = False
+        try:
+            import urllib.request
+
+            urllib.request.urlopen(FOOOCUS_URL, timeout=2)
+            ui_ok = True
+        except Exception:
+            ui_ok = False
         return {
-            "ok": True,
+            "ok": ui_ok,
             "fooocus_url": FOOOCUS_URL,
             "outputs": str(FOOOCUS_OUTPUTS),
             "bridge": "koharu-fooocus-bridge",
+            "auth": bool(BRIDGE_SECRET),
+            "jobs": len(_jobs),
         }
     except Exception as e:
         return {"ok": False, "error": str(e), "fooocus_url": FOOOCUS_URL}
 
 
 def run_generate(body: GenBody) -> dict:
-    data = load_defaults()
-    # Gradio dep 67 includes a leading State that the client API omits
-    data[1] = False  # image grid
-    data[2] = body.prompt
-    data[3] = body.negative_prompt
-    data[4] = body.style_selections or data[4]
-    data[5] = body.performance_selection or "Speed"
-    data[6] = normalize_aspect(body.aspect_ratios_selection, data[6])
-    data[7] = max(1, min(int(body.image_number or 1), 4))
-    data[8] = "png"
-    if body.image_seed not in (-1, "-1", None):
-        data[9] = str(body.image_seed)
-    else:
-        data[9] = "0"
-    data[11] = float(body.sharpness)
-    data[12] = float(body.guidance_scale)
-    if body.base_model_name:
-        data[13] = body.base_model_name
-    data[42] = False  # Black Out NSFW = OFF
+    with _gen_lock:
+        data = load_defaults()
+        data[1] = False
+        data[2] = body.prompt
+        data[3] = body.negative_prompt
+        data[4] = body.style_selections or data[4]
+        data[5] = body.performance_selection or "Speed"
+        data[6] = normalize_aspect(body.aspect_ratios_selection, data[6])
+        data[7] = max(1, min(int(body.image_number or 1), 4))
+        data[8] = "png"
+        if body.image_seed not in (-1, "-1", None):
+            data[9] = str(body.image_seed)
+        else:
+            data[9] = "0"
+        data[11] = float(body.sharpness)
+        data[12] = float(body.guidance_scale)
+        if body.base_model_name:
+            data[13] = body.base_model_name
+        data[42] = False  # Black Out NSFW = OFF
 
-    args = data[1:]  # drop State for Gradio client
-    client = get_client()
+        args = data[1:]
+        client = get_client()
 
-    before = list_output_images()
-    client.predict(*args, fn_index=FN_GET_TASK)
+        before = list_output_images()
+        client.predict(*args, fn_index=FN_GET_TASK)
 
-    job = client.submit(fn_index=FN_GENERATE)
-    t0 = time.time()
-    while not job.done():
-        time.sleep(0.5)
-        if time.time() - t0 > 300:
-            return {"ok": False, "error": "Fooocus generate timed out (300s)"}
+        job = client.submit(fn_index=FN_GENERATE)
+        t0 = time.time()
+        while not job.done():
+            time.sleep(0.5)
+            if time.time() - t0 > 300:
+                return {"ok": False, "error": "Fooocus generate timed out (300s)"}
 
-    # Gradio client often fails deserializing galleries; read files Fooocus wrote
-    time.sleep(0.8)
-    after = list_output_images()
-    new_files = sorted(after - before, key=lambda p: p.stat().st_mtime)
-    if not new_files:
-        # wait a bit more in case of delayed flush
-        time.sleep(2.0)
+        time.sleep(0.8)
         after = list_output_images()
         new_files = sorted(after - before, key=lambda p: p.stat().st_mtime)
+        if not new_files:
+            time.sleep(2.0)
+            after = list_output_images()
+            new_files = sorted(after - before, key=lambda p: p.stat().st_mtime)
 
-    if not new_files:
+        if not new_files:
+            return {
+                "ok": False,
+                "error": "Fooocus finished but no new files in outputs folder",
+                "outputs_dir": str(FOOOCUS_OUTPUTS),
+            }
+
+        picks = new_files[-max(1, data[7]) :]
+        images_meta = []
+        for p in picks:
+            raw = p.read_bytes()
+            b64 = base64.b64encode(raw).decode("ascii")
+            images_meta.append({"base64": b64, "path": str(p), "name": p.name})
+
         return {
-            "ok": False,
-            "error": "Fooocus finished but no new files in outputs folder",
-            "outputs_dir": str(FOOOCUS_OUTPUTS),
+            "ok": True,
+            "images": images_meta,
+            "result": images_meta,
+            "base64": images_meta[-1]["base64"],
         }
 
-    # Prefer the newest N images for image_number
-    picks = new_files[-max(1, data[7]) :]
-    images_meta = []
-    for p in picks:
-        raw = p.read_bytes()
-        b64 = base64.b64encode(raw).decode("ascii")
-        images_meta.append(
-            {
-                "base64": b64,
-                "path": str(p),
-                "name": p.name,
-            }
-        )
 
-    return {
+def _job_worker(job_id: str, body: GenBody):
+    try:
+        with _jobs_lock:
+            _jobs[job_id]["status"] = "running"
+        result = run_generate(body)
+        with _jobs_lock:
+            if result.get("ok"):
+                _jobs[job_id].update(
+                    {
+                        "status": "done",
+                        "base64": result.get("base64"),
+                        "images": result.get("images"),
+                        "finished_at": time.time(),
+                    }
+                )
+            else:
+                _jobs[job_id].update(
+                    {
+                        "status": "error",
+                        "error": result.get("error") or "generate failed",
+                        "finished_at": time.time(),
+                    }
+                )
+    except Exception as e:
+        traceback.print_exc()
+        with _jobs_lock:
+            _jobs[job_id].update(
+                {"status": "error", "error": str(e), "finished_at": time.time()}
+            )
+
+
+@app.post("/v1/jobs")
+def start_job(body: GenBody):
+    job_id = uuid.uuid4().hex
+    with _jobs_lock:
+        _jobs[job_id] = {
+            "id": job_id,
+            "status": "queued",
+            "created_at": time.time(),
+            "prompt": body.prompt[:200],
+        }
+    t = threading.Thread(target=_job_worker, args=(job_id, body), daemon=True)
+    t.start()
+    return {"ok": True, "id": job_id, "status": "queued"}
+
+
+@app.get("/v1/jobs/{job_id}")
+def get_job(job_id: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    # Don't bloat poll responses until done
+    out = {
         "ok": True,
-        "images": images_meta,
-        "result": images_meta,
-        "base64": images_meta[-1]["base64"],
+        "id": job_id,
+        "status": job["status"],
+        "error": job.get("error"),
     }
+    if job["status"] == "done":
+        out["base64"] = job.get("base64")
+        out["images"] = job.get("images")
+    return out
 
 
 @app.post("/v1/generation/text-to-image")
@@ -216,20 +307,24 @@ def text_to_image(body: GenBody):
 
 
 def main():
-    global FOOOCUS_URL, FOOOCUS_OUTPUTS, _client
+    global FOOOCUS_URL, FOOOCUS_OUTPUTS, _client, BRIDGE_SECRET
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8888)
     parser.add_argument("--fooocus", default=None)
     parser.add_argument("--outputs", default=None)
+    parser.add_argument("--secret", default=None)
     args = parser.parse_args()
     if args.fooocus:
         FOOOCUS_URL = args.fooocus
         _client = None
     if args.outputs:
         FOOOCUS_OUTPUTS = Path(args.outputs)
+    if args.secret:
+        BRIDGE_SECRET = args.secret
     print(f"Koharu Fooocus bridge -> {FOOOCUS_URL}")
     print(f"Outputs folder -> {FOOOCUS_OUTPUTS}")
+    print(f"Auth secret enabled -> {bool(BRIDGE_SECRET)}")
     print(f"Listening on http://{args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 

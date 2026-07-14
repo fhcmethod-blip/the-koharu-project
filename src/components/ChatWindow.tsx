@@ -2,13 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Character, ChatMessage } from "@/lib/types";
-import { generateReply } from "@/lib/chat-client";
+import {
+  generateReply,
+  startImageJob,
+  waitForImageJob,
+  wantsImage,
+  wantsGenerated,
+} from "@/lib/chat-client";
 import { clearChat, loadChat, saveChat } from "@/lib/chat-store";
 
 export function ChatWindow({ character }: { character: Character }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [statusLine, setStatusLine] = useState<string | null>(null);
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [imageNote, setImageNote] = useState<string | null>(null);
@@ -31,11 +38,12 @@ export function ChatWindow({ character }: { character: Character }) {
     setError(null);
     setSource(null);
     setImageNote(null);
+    setStatusLine(null);
   }, [character.id, character.greeting]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, busy]);
+  }, [messages, busy, statusLine]);
 
   async function send(text?: string) {
     const content = (text ?? input).trim();
@@ -53,36 +61,70 @@ export function ChatWindow({ character }: { character: Character }) {
     setInput("");
     setBusy(true);
     setError(null);
+    setStatusLine(null);
     saveChat(character.id, next);
 
     try {
-      const reply = await generateReply(character, next, content);
+      let preloadedImageUrl: string | undefined;
+      let imageSourceNote: string | undefined;
+
+      // Async image path: avoids Cloudflare/Vercel killing long requests
+      if (wantsImage(content) && wantsGenerated(content)) {
+        setStatusLine(`${character.name} is generating a pic… (1–2 min)`);
+        try {
+          const job = await startImageJob(character.id, content);
+          if (!job.id) throw new Error("No job id from server");
+          const done = await waitForImageJob(job.id, {
+            timeoutMs: 240_000,
+            onTick: (s) =>
+              setStatusLine(
+                `${character.name} is generating a pic… (${s || "working"})`,
+              ),
+          });
+          preloadedImageUrl = done.imageUrl;
+          imageSourceNote = job.mode
+            ? `fooocus:${job.mode}`
+            : "fooocus";
+          setStatusLine(`${character.name} is typing…`);
+        } catch (imgErr) {
+          const msg =
+            imgErr instanceof Error ? imgErr.message : "Image gen failed";
+          setImageNote(`No image — ${msg}`);
+          setStatusLine(`${character.name} is typing…`);
+        }
+      } else {
+        setStatusLine(`${character.name} is typing…`);
+      }
+
+      const reply = await generateReply(character, next, content, {
+        skipImage: true,
+        preloadedImageUrl,
+      });
+
       const assistantMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
         content: reply.content,
-        imageUrl: reply.imageUrl,
+        imageUrl: reply.imageUrl || preloadedImageUrl,
         createdAt: new Date().toISOString(),
       };
       const withReply = [...next, assistantMsg];
       setMessages(withReply);
       saveChat(character.id, withReply);
       if (reply.source) setSource(reply.source);
-      if (reply.imageUrl) {
-        const src = reply.imageSource || "";
+
+      const finalImg = assistantMsg.imageUrl;
+      if (finalImg) {
+        const src = reply.imageSource || imageSourceNote || "";
         setImageNote(
           src.startsWith("fooocus") || src === "generated"
             ? `Image: Fooocus${src.includes(":") ? ` (${src.split(":")[1]})` : ""}`
             : src === "library"
               ? "Image: library"
-              : src === "pony"
-                ? "Image: Pony"
-                : "Image attached",
+              : "Image attached",
         );
       } else if (reply.imageError) {
         setImageNote(`No image — ${reply.imageError}`);
-      } else {
-        setImageNote(null);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Chat failed";
@@ -90,7 +132,8 @@ export function ChatWindow({ character }: { character: Character }) {
       const failMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: "I lost the connection for a second… try sending that again?",
+        content:
+          "I lost the connection for a second… if you asked for a pic, try “show” again — generation can take a couple minutes.",
         createdAt: new Date().toISOString(),
       };
       const withFail = [...next, failMsg];
@@ -98,6 +141,7 @@ export function ChatWindow({ character }: { character: Character }) {
       saveChat(character.id, withFail);
     } finally {
       setBusy(false);
+      setStatusLine(null);
     }
   }
 
@@ -113,6 +157,8 @@ export function ChatWindow({ character }: { character: Character }) {
     saveChat(character.id, [intro]);
     setError(null);
     setSource(null);
+    setImageNote(null);
+    setStatusLine(null);
   }
 
   const sourceLabel =
@@ -177,7 +223,7 @@ export function ChatWindow({ character }: { character: Character }) {
         {busy && (
           <div className="flex justify-start">
             <div className="rounded-2xl border border-card-border bg-card px-4 py-3 text-sm text-muted">
-              {character.name} is typing…
+              {statusLine || `${character.name} is typing…`}
             </div>
           </div>
         )}
@@ -196,7 +242,7 @@ export function ChatWindow({ character }: { character: Character }) {
             className="input-field"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={`Message ${character.name}…`}
+            placeholder={`Message ${character.name}… (try “show”)`}
             disabled={busy}
             autoComplete="off"
           />
@@ -213,9 +259,7 @@ export function ChatWindow({ character }: { character: Character }) {
             <span className="text-accent-soft">{error}</span>
           ) : (
             <>
-              {sourceLabel
-                ? `${sourceLabel} · rules on`
-                : "18+ companion chat"}
+              {sourceLabel ? `${sourceLabel} · rules on` : "18+ companion chat"}
               {imageNote ? ` · ${imageNote}` : ""}
             </>
           )}

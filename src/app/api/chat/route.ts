@@ -17,6 +17,9 @@ type ChatBody = {
   character: Character;
   history: ChatMessage[];
   userText: string;
+  /** Client already generated image via job poll (Vercel-safe). */
+  skipImage?: boolean;
+  preloadedImageUrl?: string;
 };
 
 function buildMessages(
@@ -102,7 +105,13 @@ async function callOpenAICompatible(opts: {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as ChatBody;
-    const { character, history = [], userText } = body;
+    const {
+      character,
+      history = [],
+      userText,
+      skipImage = false,
+      preloadedImageUrl,
+    } = body;
 
     if (!character?.id || !userText?.trim()) {
       return NextResponse.json(
@@ -114,14 +123,18 @@ export async function POST(req: NextRequest) {
     const text = userText.trim();
     const errors: string[] = [];
 
-    // Optional image attach (library and/or generation) — BEFORE text reply
-    let imageUrl: string | undefined;
-    let imageSource: string | undefined;
+    // Optional image attach — BEFORE text reply
+    // On Vercel, client should poll /api/image/jobs and pass preloadedImageUrl
+    // so this request stays under platform timeouts.
+    let imageUrl: string | undefined = preloadedImageUrl || undefined;
+    let imageSource: string | undefined = preloadedImageUrl
+      ? "fooocus"
+      : undefined;
     let imageError: string | undefined;
-    const imageRequested = wantsImage(text);
+    const imageRequested = wantsImage(text) || !!preloadedImageUrl;
 
-    if (imageRequested) {
-      // "show" / generate / etc. → Fooocus gen first (not library)
+    if (imageRequested && !skipImage && !preloadedImageUrl) {
+      // Local / long-running server only: generate inline
       const forceGen = wantsGenerated(text);
       const tryGen = async () => {
         const gen = await generateCompanionImage({
@@ -154,6 +167,10 @@ export async function POST(req: NextRequest) {
           await tryGen();
         }
       }
+    }
+
+    if (skipImage && !preloadedImageUrl && imageRequested) {
+      imageError = imageError || "Image not provided by client job";
     }
 
     // Tell the LLM whether a real image was attached
