@@ -5,9 +5,8 @@ import { isOwnerEmail } from "@/lib/access";
 export const runtime = "nodejs";
 
 /**
- * Token exchange for direct browser → Vercel Blob uploads.
- * Required for files larger than ~4.5MB (Vercel function body limit).
- * Supports multi‑GB videos.
+ * Browser → Vercel Blob direct upload (multi‑GB videos).
+ * Files land on the public CDN and play on any device.
  */
 export async function POST(request: Request): Promise<NextResponse> {
   const body = (await request.json()) as HandleUploadBody;
@@ -17,7 +16,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       body,
       request,
       onBeforeGenerateToken: async (pathname, clientPayload) => {
-        // clientPayload: JSON { email, tier, companion, kind }
         let email = "";
         let tier = "";
         try {
@@ -26,67 +24,53 @@ export async function POST(request: Request): Promise<NextResponse> {
               email?: string;
               tier?: string;
             };
-            email = (p.email || "").toLowerCase();
-            tier = (p.tier || "").toLowerCase();
+            email = (p.email || "").trim().toLowerCase();
+            tier = (p.tier || "").trim().toLowerCase();
           }
         } catch {
-          /* ignore */
+          /* ignore bad payload */
         }
 
-        // Also accept headers if client sends them on the token request
-        const hEmail = (
-          request.headers.get("x-user-email") ||
-          ""
-        ).toLowerCase();
-        const hTier = (request.headers.get("x-user-tier") || "").toLowerCase();
-        email = email || hEmail;
-        tier = tier || hTier;
+        email =
+          email ||
+          (request.headers.get("x-user-email") || "").trim().toLowerCase();
+        tier =
+          tier ||
+          (request.headers.get("x-user-tier") || "").trim().toLowerCase();
 
         const open = process.env.MEDIA_OPEN_UPLOAD === "1";
         const allowed =
-          open || isOwnerEmail(email) || (tier === "vip" && !!email);
+          open ||
+          isOwnerEmail(email) ||
+          (Boolean(email) && (tier === "vip" || tier === "plus"));
 
         if (!allowed) {
           throw new Error(
-            "Upload not allowed. Log in as owner/VIP (Account → full access).",
+            "Cloud upload blocked. Log in, open Account, set VIP / full access, then try again.",
           );
         }
 
-        // Only allow our vault path layout
         if (!pathname.startsWith("vault/")) {
-          throw new Error("Invalid upload path");
+          throw new Error("Invalid upload path (must be vault/...)");
         }
 
         return {
-          // Wide types for photos + large videos
-          allowedContentTypes: [
-            "image/jpeg",
-            "image/png",
-            "image/webp",
-            "image/gif",
-            "image/avif",
-            "video/mp4",
-            "video/webm",
-            "video/quicktime",
-            "video/x-m4v",
-            "video/x-matroska",
-            "application/octet-stream",
-          ],
-          // 5 GB max per file (adjust if your plan allows more)
+          // Allow any content type — phones/cameras use odd MIME types
           maximumSizeInBytes: 5 * 1024 * 1024 * 1024,
           addRandomSuffix: false,
           allowOverwrite: true,
-          tokenPayload: JSON.stringify({ email, tier }),
+          tokenPayload: JSON.stringify({ email, tier, pathname }),
         };
       },
       onUploadCompleted: async ({ blob }) => {
-        // Optional: log / index — list API already discovers blobs by prefix
-        console.log("vault blob ready", blob.pathname, blob.url);
+        // Never throw — a failed callback must not look like a failed upload
+        console.log("[vault] cloud upload complete", blob.pathname, blob.url);
       },
     });
 
     return NextResponse.json(jsonResponse);
   } catch (error) {
+    console.error("[vault] client-upload error", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "upload token failed" },
       { status: 400 },

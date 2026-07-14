@@ -69,18 +69,16 @@ export default function MediaManagerPage() {
         );
         const data = await res.json();
         if (res.ok) {
-          library = (data.items?.library || []).map((x: MediaItem) => ({
+          const tag = (x: MediaItem): MediaItem => ({
             ...x,
             source: "server" as const,
-          }));
-          videos = (data.items?.videos || []).map((x: MediaItem) => ({
-            ...x,
-            source: "server" as const,
-          }));
-          generated = (data.items?.generated || []).map((x: MediaItem) => ({
-            ...x,
-            source: "server" as const,
-          }));
+            // normalize size if missing
+            size: x.size || 0,
+            mtime: x.mtime || 0,
+          });
+          library = (data.items?.library || []).map(tag);
+          videos = (data.items?.videos || []).map(tag);
+          generated = (data.items?.generated || []).map(tag);
         }
       } catch {
         /* server media unavailable (common on Vercel) */
@@ -133,9 +131,39 @@ export default function MediaManagerPage() {
     return h;
   }, [user]);
 
+  async function uploadToCloud(file: File, kind: "library" | "videos" | "generated") {
+    const { pathname } = vaultBlobPathname(companion, kind, file.name);
+    // Always direct-to-cloud for anything that matters (esp. videos)
+    const result = await upload(pathname, file, {
+      access: "public",
+      handleUploadUrl: "/api/media/client-upload",
+      clientPayload: JSON.stringify({
+        email: user?.email || "",
+        tier: user?.tier || "vip",
+        companion,
+        kind,
+      }),
+      // Multipart for multi‑GB; also fine for medium files
+      multipart: file.size > 8 * 1024 * 1024,
+      contentType: file.type || "application/octet-stream",
+      onUploadProgress: ({ percentage }) => {
+        setUploadProgress(
+          `Cloud upload: ${file.name} — ${Math.round(percentage)}%`,
+        );
+      },
+    });
+    return result;
+  }
+
   async function uploadFiles(fileList: FileList | File[]) {
     const files = Array.from(fileList);
     if (!files.length) return;
+
+    if (!user?.email) {
+      setError("Log in first, then upload.");
+      return;
+    }
+
     setUploading(true);
     setUploadProgress(null);
     setMessage(null);
@@ -143,48 +171,36 @@ export default function MediaManagerPage() {
     const kind =
       tab === "generated" ? "library" : tab === "videos" ? "videos" : "library";
 
-    const ok: string[] = [];
+    const ok: { name: string; url: string }[] = [];
     const errs: string[] = [];
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const label = `${file.name} (${formatBytes(file.size)})`;
-        setUploadProgress(`Uploading ${i + 1}/${files.length}: ${label}`);
+        setUploadProgress(
+          `Uploading ${i + 1}/${files.length}: ${file.name} (${formatBytes(file.size)})`,
+        );
 
         if (file.size > FILE_MAX_BYTES) {
           errs.push(
-            `${file.name}: over 5 GB limit (file is ${formatBytes(file.size)})`,
+            `${file.name}: over 5 GB (file is ${formatBytes(file.size)})`,
           );
           continue;
         }
 
+        const isVideo =
+          file.type.startsWith("video/") ||
+          /\.(mp4|webm|mov|m4v|mkv)$/i.test(file.name);
+
         try {
-          // Large files (videos) go browser → Blob directly (supports multi‑GB)
-          if (file.size > SERVER_UPLOAD_MAX) {
-            const { pathname } = vaultBlobPathname(companion, kind, file.name);
-            await upload(pathname, file, {
-              access: "public",
-              handleUploadUrl: "/api/media/client-upload",
-              clientPayload: JSON.stringify({
-                email: user?.email || "",
-                tier: user?.tier || "",
-                companion,
-                kind,
-              }),
-              multipart: true,
-              contentType: file.type || undefined,
-              onUploadProgress: ({ percentage }) => {
-                setUploadProgress(
-                  `Uploading ${i + 1}/${files.length}: ${file.name} — ${Math.round(percentage)}%`,
-                );
-              },
-            });
-            ok.push(file.name);
+          // Videos + anything over 4MB → direct cloud (playable on phone + PC)
+          if (isVideo || file.size > SERVER_UPLOAD_MAX) {
+            const blob = await uploadToCloud(file, kind);
+            ok.push({ name: file.name, url: blob.url });
             continue;
           }
 
-          // Small files: server route (also writes to Blob when token is set)
+          // Tiny images: server upload (also stores in Blob when configured)
           const form = new FormData();
           form.set("companion", companion);
           form.set("kind", kind);
@@ -196,16 +212,22 @@ export default function MediaManagerPage() {
           });
           const data = await res.json();
           if (!res.ok || !data.count) {
-            throw new Error(data.error || "server upload failed");
+            // Fall through to client cloud upload
+            const blob = await uploadToCloud(file, kind);
+            ok.push({ name: file.name, url: blob.url });
+            continue;
           }
-          ok.push(file.name);
+          const url = data.saved?.[0]?.url || "";
+          ok.push({ name: file.name, url });
         } catch (e) {
           const msg = e instanceof Error ? e.message : "failed";
-          // Tiny fallback only for small files
-          if (file.size <= SERVER_UPLOAD_MAX) {
+          // NEVER store videos in browser-only storage — that only works on this device
+          if (!isVideo && file.size <= SERVER_UPLOAD_MAX) {
             try {
               await localVaultSave(companion, kind, file);
-              ok.push(`${file.name} (device only)`);
+              errs.push(
+                `${file.name}: cloud failed (${msg}) — saved on THIS device only`,
+              );
               continue;
             } catch {
               /* */
@@ -217,18 +239,22 @@ export default function MediaManagerPage() {
 
       if (ok.length) {
         setMessage(
-          `Uploaded ${ok.length} file${ok.length === 1 ? "" : "s"} to cloud — stays online, plays in the vault (up to 5 GB each)`,
+          `✓ ${ok.length} file${ok.length === 1 ? "" : "s"} saved in the CLOUD — playable on phones & computers. Open IRL Vault to watch.`,
         );
       }
       if (errs.length) setError(errs.join("; "));
-      if (!ok.length && errs.length) {
-        throw new Error(errs[0]);
-      }
+      if (!ok.length && errs.length) throw new Error(errs[0]);
 
       const onlyVideo =
         files.length > 0 &&
-        files.every((f) => /\.(mp4|webm|mov|m4v|mkv)$/i.test(f.name));
+        files.every(
+          (f) =>
+            f.type.startsWith("video/") ||
+            /\.(mp4|webm|mov|m4v|mkv)$/i.test(f.name),
+        );
       if (onlyVideo) setTab("videos");
+      // Give Blob a moment to index, then refresh list
+      await new Promise((r) => setTimeout(r, 800));
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
@@ -290,9 +316,10 @@ export default function MediaManagerPage() {
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Media Manager</h1>
           <p className="prose-muted mt-1 text-sm">
-            Upload IRL photos &amp; videos — they store in{" "}
-            <strong className="text-foreground/90">cloud storage</strong> and stay
-            online so anyone with access can play them in the vault.
+            Upload IRL photos &amp; videos to{" "}
+            <strong className="text-foreground/90">cloud storage</strong> (not
+            just this browser). They stay online and play on phones + PCs in the
+            vault. Use Account → <strong>VIP / full access</strong> before uploading.
           </p>
           <Link
             href="/app/vault"
@@ -443,6 +470,13 @@ export default function MediaManagerPage() {
                       loading="lazy"
                     />
                   )}
+                  <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white/90">
+                    {item.source === "local"
+                      ? "this device only"
+                      : item.url?.includes("blob.vercel-storage.com")
+                        ? "cloud ✓"
+                        : "server"}
+                  </span>
                   <span className="absolute bottom-0 left-0 right-0 bg-black/65 px-2 py-1 text-[10px] text-white/90">
                     {formatBytes(item.size)}
                   </span>

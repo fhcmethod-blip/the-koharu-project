@@ -71,41 +71,34 @@ export default function VaultPage() {
       }
 
       let local: LocalVaultItem[] = [];
+      // Prefer cloud only — browser-only files do NOT play on phones
       try {
         local = await localVaultList(companion, "all");
       } catch {
         local = [];
       }
 
-      const localPhotos = local.filter((i) => i.kind === "library");
-      const localVideos = local.filter((i) => i.kind === "videos");
+      setPhotos(serverPhotos);
+      setVideos(serverVideos);
 
-      // Prefer server files; merge local that aren't duplicates by name
-      const photoNames = new Set(serverPhotos.map((p) => p.name));
-      const videoNames = new Set(serverVideos.map((v) => v.name));
-      const mergedPhotos = [
-        ...serverPhotos,
-        ...localPhotos.filter((p) => !photoNames.has(p.name)),
-      ];
-      const mergedVideos = [
-        ...serverVideos,
-        ...localVideos.filter((v) => !videoNames.has(v.name)),
-      ];
-
-      setPhotos(mergedPhotos);
-      setVideos(mergedVideos);
-
-      if (!serverOk && local.length === 0) {
+      if (serverOk && (serverPhotos.length || serverVideos.length)) {
         setStorageNote(
-          "No media yet. Owner: open Media Manager and upload — files store in the cloud and stay online.",
+          "Cloud vault — these files play on phones and computers.",
         );
-      } else if (!serverOk && local.length > 0) {
+      } else if (serverOk) {
         setStorageNote(
-          "Showing device-only files (cloud list unavailable). Prefer Media Manager cloud upload for permanent vault.",
+          "Cloud vault is empty. Owner: Media Manager → upload video (must finish % progress). Files then play everywhere.",
         );
+      } else if (local.length > 0) {
+        setStorageNote(
+          "Only device-local files found (not on cloud). Re-upload in Media Manager so phones can play them.",
+        );
+        // Show local only as last resort on this device
+        setPhotos(local.filter((i) => i.kind === "library"));
+        setVideos(local.filter((i) => i.kind === "videos"));
       } else {
         setStorageNote(
-          "Cloud vault — uploads stay online and play here for members with access.",
+          "No media yet. Upload via Media Manager (VIP/owner) to cloud storage.",
         );
       }
     } finally {
