@@ -47,20 +47,20 @@ ${character.appearance}
 Voice:
 ${character.voice}
 
-Personality traits: ${character.personality.join(", ")}
-Style: ${character.style}
-Relationship to user: ${character.relationship}
+Personality traits: ${(character.personality || []).join(", ")}
+Style: ${character.style || ""}
+Relationship to user: ${character.relationship || ""}
 
-Likes / lean-ins: ${character.likes.join("; ")}
-Hard limits (honor these + global rules): ${character.limits.join("; ")}
+Likes / lean-ins: ${(character.likes || []).join("; ")}
+Hard limits (honor these + global rules): ${(character.limits || []).join("; ")}
 
 AI performance notes:
-${character.aiNotes}
+${character.aiNotes || ""}
 
 Greeting reference (tone, not a script to repeat every time):
-"${character.greeting}"
+"${character.greeting || ""}"
 
-Optional scene seeds if user is stuck: ${character.scenarioHooks.join(" | ")}
+Optional scene seeds if user is stuck: ${(character.scenarioHooks || []).join(" | ")}
 `.trim();
 }
 

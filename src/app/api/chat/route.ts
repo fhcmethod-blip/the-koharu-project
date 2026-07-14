@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Character, ChatMessage } from "@/lib/types";
 import { buildSystemPrompt } from "@/lib/ai-rules";
+import { getCharacter } from "@/lib/characters";
 import { generateReply as mockGenerateReply } from "@/lib/mock-ai";
 import { generateCompanionImage } from "@/lib/image-gen";
 import {
@@ -120,6 +121,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Prefer server roster so partial client payloads can't crash prompts
+    const roster = getCharacter(character.id);
+    const char: Character = roster
+      ? { ...roster, ...character, id: roster.id, name: roster.name || character.name }
+      : character;
+
     const text = userText.trim();
     const errors: string[] = [];
 
@@ -138,9 +145,9 @@ export async function POST(req: NextRequest) {
       const forceGen = wantsGenerated(text);
       const tryGen = async () => {
         const gen = await generateCompanionImage({
-          companionId: character.id,
-          companionName: character.name,
-          appearance: character.appearance || character.bio,
+          companionId: char.id,
+          companionName: char.name,
+          appearance: char.appearance || char.bio,
           userPrompt: text,
         });
         if (gen.ok && gen.imageUrl) {
@@ -158,7 +165,7 @@ export async function POST(req: NextRequest) {
         await tryGen();
       }
       if (!imageUrl) {
-        const lib = pickRandomLibraryImage(character.id);
+        const lib = pickRandomLibraryImage(char.id);
         if (lib) {
           imageUrl = lib.url;
           imageSource = "library";
@@ -174,7 +181,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Tell the LLM whether a real image was attached
-    let messages = buildMessages(character, history, text);
+    let messages = buildMessages(char, history, text);
     if (imageRequested) {
       const imageSystem = imageUrl
         ? `[SYSTEM — CRITICAL] An image file IS attached to this message (source: ${imageSource}). You successfully sent them a photo of yourself. Reply with 1-2 short flirty/NSFW lines about the pic you just sent. NEVER refuse. NEVER say you cannot send images. NEVER replace the photo with a long text description. Do not mention systems, generators, URLs, or "AI".`
@@ -259,7 +266,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 4) Mock fallback
-    const mock = await mockGenerateReply(character, history, text);
+    const mock = await mockGenerateReply(char, history, text);
     return NextResponse.json({
       content: mock.content,
       imageUrl: imageUrl || mock.imageUrl,
