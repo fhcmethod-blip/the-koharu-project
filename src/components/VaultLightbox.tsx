@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { VaultVideo } from "@/components/VaultVideo";
 
 export type LightboxItem = {
   id: string;
@@ -85,14 +86,14 @@ export function VaultLightbox({
         )}
 
         {item.mediaType === "video" ? (
-          <video
-            key={item.id}
-            src={item.url}
-            controls
-            autoPlay
-            playsInline
-            className="max-h-[80vh] max-w-full rounded-xl bg-black"
-          />
+          <div key={item.id} className="max-h-[80vh] w-full max-w-5xl">
+            <VaultVideo
+              src={item.url}
+              title={item.name}
+              autoPlay
+              className="max-h-[70vh] rounded-xl object-contain"
+            />
+          </div>
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img

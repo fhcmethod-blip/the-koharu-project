@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { VaultGrid } from "@/components/VaultGrid";
 import { VaultLightbox, type LightboxItem } from "@/components/VaultLightbox";
+import { VaultVideo } from "@/components/VaultVideo";
 import { useAuth } from "@/lib/auth";
 import { characters } from "@/lib/characters";
 import {
@@ -292,21 +293,22 @@ export default function VaultPage() {
                 className="overflow-hidden rounded-2xl border border-card-border bg-card"
               >
                 {canVideos ? (
-                  <button
-                    type="button"
-                    className="block w-full"
-                    onClick={() =>
-                      setLightbox({ items: videoItems, index: i })
-                    }
-                  >
-                    <video
+                  <div className="w-full">
+                    <VaultVideo
                       src={vid.url}
-                      className="aspect-video w-full bg-black object-cover"
-                      preload="metadata"
-                      muted
-                      playsInline
+                      title={vid.name}
+                      className="aspect-video object-contain"
                     />
-                  </button>
+                    <button
+                      type="button"
+                      className="w-full px-3 py-1 text-left text-[11px] text-muted hover:text-accent-soft"
+                      onClick={() =>
+                        setLightbox({ items: videoItems, index: i })
+                      }
+                    >
+                      Open fullscreen →
+                    </button>
+                  </div>
                 ) : (
                   <div className="flex aspect-video flex-col items-center justify-center bg-gradient-to-br from-violet-950/80 to-black text-center">
                     <span className="text-2xl">🔒</span>

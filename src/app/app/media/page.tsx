@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { characters } from "@/lib/characters";
 import { vaultBlobPathname } from "@/lib/media-path";
+import { VaultVideo } from "@/components/VaultVideo";
 import {
   localVaultDelete,
   localVaultList,
@@ -368,9 +369,12 @@ export default function MediaManagerPage() {
             : "Drop images or videos here"}
         </p>
         <p className="prose-muted mt-2 text-sm">
-          Images: JPG PNG WEBP GIF · Videos: MP4 WEBM MOV ·{" "}
-          <strong className="text-foreground/80">up to 5 GB per file</strong>{" "}
-          (large videos upload straight to cloud)
+          Images: JPG PNG WEBP GIF · Videos:{" "}
+          <strong className="text-foreground/80">H.264 MP4 1080p</strong> works
+          best on phones &amp; Chrome. iPhone/8K/HEVC often = sound only.{" "}
+          Convert first:{" "}
+          <code className="text-accent-soft">scripts\convert-video-for-web.bat</code>
+          · up to 5 GB
         </p>
         <label className="btn-primary mt-6 inline-flex cursor-pointer">
           {uploading ? "Please wait…" : "Choose files"}
@@ -496,10 +500,10 @@ export default function MediaManagerPage() {
           ) : (
             <div className="mt-4 space-y-3">
               {selected.mediaType === "video" ? (
-                <video
+                <VaultVideo
                   src={selected.url}
-                  controls
-                  className="w-full rounded-xl bg-black"
+                  title={selected.name}
+                  className="rounded-xl"
                 />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
