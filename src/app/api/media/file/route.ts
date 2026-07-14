@@ -5,14 +5,15 @@ import {
   resolveMediaPath,
   type MediaKind,
 } from "@/lib/media";
+import { blobDelete, blobEnabled, blobListCompanion } from "@/lib/media-blob";
 
 export const runtime = "nodejs";
 
 const KINDS = new Set(["library", "generated", "videos"]);
 
 /**
- * GET  /api/media/file?companion=koharu&kind=library&name=photo1.jpg
- * DELETE same query — requires x-user-email owner header
+ * GET  — serve local disk file (Blob files use direct CDN urls from list)
+ * DELETE — remove from Blob and/or disk
  */
 export async function GET(req: NextRequest) {
   try {
@@ -28,9 +29,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Invalid kind" }, { status: 400 });
     }
 
-    // Note: <img>/<video> cannot send auth headers, so file bytes are served
-    // when the URL is known. Membership locks are enforced in the Vault UI.
-    // For production hardening, switch to signed short-lived cookie URLs.
+    // If file lives on Blob, redirect to permanent CDN URL
+    if (blobEnabled()) {
+      try {
+        const cloud = await blobListCompanion(companion, kind);
+        const hit = cloud.find((i) => i.name === name);
+        if (hit?.url) {
+          return NextResponse.redirect(hit.url, 302);
+        }
+      } catch {
+        /* fall through to disk */
+      }
+    }
 
     const full = resolveMediaPath(companion, kind, name);
     if (!fs.existsSync(full)) {
@@ -69,14 +79,30 @@ export async function DELETE(req: NextRequest) {
     const companion = searchParams.get("companion") || "";
     const kind = (searchParams.get("kind") || "library") as MediaKind;
     const name = searchParams.get("name") || "";
+    const blobUrl = searchParams.get("url") || "";
 
     if (!companion || !name || !KINDS.has(kind)) {
       return NextResponse.json({ error: "Missing params" }, { status: 400 });
     }
 
-    const { deleteMediaFile } = await import("@/lib/media");
-    const ok = deleteMediaFile(companion, kind, name);
-    if (!ok) {
+    let deleted = false;
+
+    if (blobEnabled()) {
+      if (blobUrl.startsWith("http")) {
+        const { blobDeleteByUrl } = await import("@/lib/media-blob");
+        deleted = (await blobDeleteByUrl(blobUrl)) || deleted;
+      }
+      deleted = (await blobDelete(companion, kind, name)) || deleted;
+    }
+
+    try {
+      const { deleteMediaFile } = await import("@/lib/media");
+      deleted = deleteMediaFile(companion, kind, name) || deleted;
+    } catch {
+      /* no disk copy */
+    }
+
+    if (!deleted) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
     return NextResponse.json({ ok: true });

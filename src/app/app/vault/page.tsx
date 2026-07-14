@@ -97,18 +97,16 @@ export default function VaultPage() {
 
       if (!serverOk && local.length === 0) {
         setStorageNote(
-          "No media on this host yet. On Vercel, uploads save in this browser (Media Manager). On your PC, files go to media/koharu/.",
+          "No media yet. Owner: open Media Manager and upload — files store in the cloud and stay online.",
         );
       } else if (!serverOk && local.length > 0) {
         setStorageNote(
-          "Showing vault files saved in this browser (cloud host has no permanent disk).",
-        );
-      } else if (serverOk && local.length > 0) {
-        setStorageNote(
-          `Server media + ${local.length} local browser file(s).`,
+          "Showing device-only files (cloud list unavailable). Prefer Media Manager cloud upload for permanent vault.",
         );
       } else {
-        setStorageNote(null);
+        setStorageNote(
+          "Cloud vault — uploads stay online and play here for members with access.",
+        );
       }
     } finally {
       setLoading(false);

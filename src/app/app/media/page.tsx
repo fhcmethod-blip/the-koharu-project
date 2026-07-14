@@ -134,14 +134,13 @@ export default function MediaManagerPage() {
     const kind =
       tab === "generated" ? "library" : tab === "videos" ? "videos" : "library";
     try {
-      // Try server disk first (works on PC / local Next)
       const form = new FormData();
       form.set("companion", companion);
       form.set("kind", kind);
       for (const f of files) form.append("files", f);
 
       let serverCount = 0;
-      let serverFailed = 0;
+      let permanent = false;
       try {
         const res = await fetch("/api/media/upload", {
           method: "POST",
@@ -151,12 +150,22 @@ export default function MediaManagerPage() {
         const data = await res.json();
         if (res.ok) {
           serverCount = data.count || 0;
-          serverFailed = data.failed?.length || 0;
+          permanent = Boolean(data.permanent);
+          if (data.failed?.length) {
+            setError(
+              data.failed
+                .map((f: { name: string; error: string }) => `${f.name}: ${f.error}`)
+                .join("; "),
+            );
+          }
+          if (!serverCount) {
+            throw new Error(data.error || "No files saved");
+          }
         } else {
           throw new Error(data.error || "server upload failed");
         }
-      } catch {
-        // Fallback: IndexedDB (works on Vercel / any browser)
+      } catch (uploadErr) {
+        // Last resort: this browser only (not shared across devices)
         let localCount = 0;
         const errs: string[] = [];
         for (const f of files) {
@@ -170,10 +179,12 @@ export default function MediaManagerPage() {
           }
         }
         if (!localCount) {
-          throw new Error(errs[0] || "Upload failed on server and device");
+          throw uploadErr instanceof Error
+            ? uploadErr
+            : new Error(errs[0] || "Upload failed");
         }
         setMessage(
-          `Saved ${localCount} file${localCount === 1 ? "" : "s"} in this browser (vault device storage)`,
+          `Saved ${localCount} on this device only (cloud upload failed — check Blob token)`,
         );
         if (errs.length) setError(errs.join("; "));
         const onlyVideo =
@@ -185,9 +196,9 @@ export default function MediaManagerPage() {
       }
 
       setMessage(
-        `Uploaded ${serverCount} file${serverCount === 1 ? "" : "s"} to server${
-          serverFailed ? ` · ${serverFailed} failed` : ""
-        }`,
+        permanent
+          ? `Uploaded ${serverCount} file${serverCount === 1 ? "" : "s"} to cloud — permanent, plays on any device`
+          : `Uploaded ${serverCount} file${serverCount === 1 ? "" : "s"} to server disk`,
       );
       const onlyVideo =
         files.length > 0 &&
@@ -208,10 +219,16 @@ export default function MediaManagerPage() {
       if (item.source === "local") {
         await localVaultDelete(item.id);
       } else {
-        const res = await fetch(
-          `/api/media/file?companion=${encodeURIComponent(item.companionId)}&kind=${item.kind}&name=${encodeURIComponent(item.name)}`,
-          { method: "DELETE", headers },
-        );
+        const qs = new URLSearchParams({
+          companion: item.companionId,
+          kind: item.kind,
+          name: item.name,
+        });
+        if (item.url?.startsWith("http")) qs.set("url", item.url);
+        const res = await fetch(`/api/media/file?${qs}`, {
+          method: "DELETE",
+          headers,
+        });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Delete failed");
       }
@@ -247,9 +264,9 @@ export default function MediaManagerPage() {
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Media Manager</h1>
           <p className="prose-muted mt-1 text-sm">
-            Add IRL images &amp; videos for the vault. On your PC they save under{" "}
-            <code className="text-accent-soft">media/</code>; on the cloud site they
-            save in this browser so the vault still works.
+            Upload IRL photos &amp; videos — they store in{" "}
+            <strong className="text-foreground/90">cloud storage</strong> and stay
+            online so anyone with access can play them in the vault.
           </p>
           <Link
             href="/app/vault"

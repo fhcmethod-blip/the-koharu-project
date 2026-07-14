@@ -6,32 +6,26 @@ import {
   saveUploadedFile,
   type MediaKind,
 } from "@/lib/media";
+import { blobEnabled, blobUpload } from "@/lib/media-blob";
 
 export const runtime = "nodejs";
-
-// Allow large video uploads (Next may still cap depending on host)
 export const maxDuration = 300;
 
 /**
  * POST /api/media/upload
- * multipart form-data:
- *  - companion: koharu
- *  - kind: library | videos | generated
- *  - files: one or more
- * Header: x-user-email (owner) OR MEDIA_OPEN_UPLOAD=1
+ * multipart form-data: companion, kind, files
+ * Prefer Vercel Blob (permanent CDN) when BLOB_READ_WRITE_TOKEN is set.
  */
 export async function POST(req: NextRequest) {
   try {
     const email = (req.headers.get("x-user-email") || "").toLowerCase();
     const open = process.env.MEDIA_OPEN_UPLOAD === "1";
     const allowVip = process.env.MEDIA_ALLOW_VIP_MANAGE === "1";
-
     const tier = (req.headers.get("x-user-tier") || "").toLowerCase();
     const allowed =
       open ||
       isOwnerEmail(email) ||
       (allowVip && tier === "vip" && !!email) ||
-      // Local demo convenience: any authenticated VIP/owner email header
       (tier === "vip" && !!email);
 
     if (!allowed) {
@@ -51,7 +45,10 @@ export async function POST(req: NextRequest) {
       kind = "library";
     }
 
-    ensureMediaDirs(companion);
+    const useBlob = blobEnabled();
+    if (!useBlob) {
+      ensureMediaDirs(companion);
+    }
 
     const files = form.getAll("files").filter((f) => f instanceof File) as File[];
     const single = form.get("file");
@@ -73,14 +70,26 @@ export async function POST(req: NextRequest) {
           });
           continue;
         }
-        // 200MB hard cap per file for safety
         if (file.size > 200 * 1024 * 1024) {
           failed.push({ name: file.name, error: "File too large (max 200MB)" });
           continue;
         }
-        const buf = Buffer.from(await file.arrayBuffer());
-        const item = saveUploadedFile(companion, kind, file.name, buf);
-        saved.push(item);
+
+        if (useBlob) {
+          const buf = Buffer.from(await file.arrayBuffer());
+          const item = await blobUpload(
+            companion,
+            kind,
+            file.name,
+            buf,
+            file.type || undefined,
+          );
+          saved.push(item);
+        } else {
+          const buf = Buffer.from(await file.arrayBuffer());
+          const item = saveUploadedFile(companion, kind, file.name, buf);
+          saved.push(item);
+        }
       } catch (e) {
         failed.push({
           name: file.name,
@@ -91,6 +100,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      storage: useBlob ? "blob" : "disk",
+      permanent: useBlob,
       saved,
       failed,
       count: saved.length,

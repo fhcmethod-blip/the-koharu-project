@@ -28,9 +28,11 @@ export type MediaFile = {
   kind: MediaKind;
   mediaType: MediaType;
   name: string;
+  /** Public playable URL (Blob CDN or /api/media/file proxy) */
   url: string;
   size: number;
   mtime: number;
+  storage?: "disk" | "blob" | "local";
 };
 
 export function mediaRoot(): string {
