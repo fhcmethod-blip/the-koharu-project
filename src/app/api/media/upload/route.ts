@@ -70,8 +70,14 @@ export async function POST(req: NextRequest) {
           });
           continue;
         }
-        if (file.size > 200 * 1024 * 1024) {
-          failed.push({ name: file.name, error: "File too large (max 200MB)" });
+        // Server route only for smaller files. Large videos use
+        // /api/media/client-upload (direct browser → Blob, up to 5GB).
+        if (file.size > 4.5 * 1024 * 1024) {
+          failed.push({
+            name: file.name,
+            error:
+              "Use Media Manager large-file upload (files over ~4MB go direct to cloud, up to 5GB)",
+          });
           continue;
         }
 

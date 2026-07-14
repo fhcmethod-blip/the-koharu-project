@@ -1,15 +1,22 @@
 "use client";
 
+import { upload } from "@vercel/blob/client";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { characters } from "@/lib/characters";
+import { vaultBlobPathname } from "@/lib/media-path";
 import {
   localVaultDelete,
   localVaultList,
   localVaultSave,
 } from "@/lib/vault-local-store";
+
+/** Above this size → direct browser→Blob (Vercel API body max is ~4.5MB). */
+const SERVER_UPLOAD_MAX = 4 * 1024 * 1024;
+/** Hard cap for a single file (5 GB) */
+const FILE_MAX_BYTES = 5 * 1024 * 1024 * 1024;
 
 type MediaItem = {
   id: string;
@@ -40,6 +47,7 @@ export default function MediaManagerPage() {
   const [counts, setCounts] = useState({ library: 0, videos: 0, generated: 0 });
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,77 +137,94 @@ export default function MediaManagerPage() {
     const files = Array.from(fileList);
     if (!files.length) return;
     setUploading(true);
+    setUploadProgress(null);
     setMessage(null);
     setError(null);
     const kind =
       tab === "generated" ? "library" : tab === "videos" ? "videos" : "library";
-    try {
-      const form = new FormData();
-      form.set("companion", companion);
-      form.set("kind", kind);
-      for (const f of files) form.append("files", f);
 
-      let serverCount = 0;
-      let permanent = false;
-      try {
-        const res = await fetch("/api/media/upload", {
-          method: "POST",
-          headers,
-          body: form,
-        });
-        const data = await res.json();
-        if (res.ok) {
-          serverCount = data.count || 0;
-          permanent = Boolean(data.permanent);
-          if (data.failed?.length) {
-            setError(
-              data.failed
-                .map((f: { name: string; error: string }) => `${f.name}: ${f.error}`)
-                .join("; "),
-            );
-          }
-          if (!serverCount) {
-            throw new Error(data.error || "No files saved");
-          }
-        } else {
-          throw new Error(data.error || "server upload failed");
+    const ok: string[] = [];
+    const errs: string[] = [];
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const label = `${file.name} (${formatBytes(file.size)})`;
+        setUploadProgress(`Uploading ${i + 1}/${files.length}: ${label}`);
+
+        if (file.size > FILE_MAX_BYTES) {
+          errs.push(
+            `${file.name}: over 5 GB limit (file is ${formatBytes(file.size)})`,
+          );
+          continue;
         }
-      } catch (uploadErr) {
-        // Last resort: this browser only (not shared across devices)
-        let localCount = 0;
-        const errs: string[] = [];
-        for (const f of files) {
-          try {
-            await localVaultSave(companion, kind, f);
-            localCount += 1;
-          } catch (e) {
-            errs.push(
-              `${f.name}: ${e instanceof Error ? e.message : "failed"}`,
-            );
+
+        try {
+          // Large files (videos) go browser → Blob directly (supports multi‑GB)
+          if (file.size > SERVER_UPLOAD_MAX) {
+            const { pathname } = vaultBlobPathname(companion, kind, file.name);
+            await upload(pathname, file, {
+              access: "public",
+              handleUploadUrl: "/api/media/client-upload",
+              clientPayload: JSON.stringify({
+                email: user?.email || "",
+                tier: user?.tier || "",
+                companion,
+                kind,
+              }),
+              multipart: true,
+              contentType: file.type || undefined,
+              onUploadProgress: ({ percentage }) => {
+                setUploadProgress(
+                  `Uploading ${i + 1}/${files.length}: ${file.name} — ${Math.round(percentage)}%`,
+                );
+              },
+            });
+            ok.push(file.name);
+            continue;
           }
+
+          // Small files: server route (also writes to Blob when token is set)
+          const form = new FormData();
+          form.set("companion", companion);
+          form.set("kind", kind);
+          form.append("files", file);
+          const res = await fetch("/api/media/upload", {
+            method: "POST",
+            headers,
+            body: form,
+          });
+          const data = await res.json();
+          if (!res.ok || !data.count) {
+            throw new Error(data.error || "server upload failed");
+          }
+          ok.push(file.name);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "failed";
+          // Tiny fallback only for small files
+          if (file.size <= SERVER_UPLOAD_MAX) {
+            try {
+              await localVaultSave(companion, kind, file);
+              ok.push(`${file.name} (device only)`);
+              continue;
+            } catch {
+              /* */
+            }
+          }
+          errs.push(`${file.name}: ${msg}`);
         }
-        if (!localCount) {
-          throw uploadErr instanceof Error
-            ? uploadErr
-            : new Error(errs[0] || "Upload failed");
-        }
-        setMessage(
-          `Saved ${localCount} on this device only (cloud upload failed — check Blob token)`,
-        );
-        if (errs.length) setError(errs.join("; "));
-        const onlyVideo =
-          files.length > 0 &&
-          files.every((f) => /\.(mp4|webm|mov|m4v|mkv)$/i.test(f.name));
-        if (onlyVideo) setTab("videos");
-        await refresh();
-        return;
       }
 
-      setMessage(
-        permanent
-          ? `Uploaded ${serverCount} file${serverCount === 1 ? "" : "s"} to cloud — permanent, plays on any device`
-          : `Uploaded ${serverCount} file${serverCount === 1 ? "" : "s"} to server disk`,
-      );
+      if (ok.length) {
+        setMessage(
+          `Uploaded ${ok.length} file${ok.length === 1 ? "" : "s"} to cloud — stays online, plays in the vault (up to 5 GB each)`,
+        );
+      }
+      if (errs.length) setError(errs.join("; "));
+      if (!ok.length && errs.length) {
+        throw new Error(errs[0]);
+      }
+
       const onlyVideo =
         files.length > 0 &&
         files.every((f) => /\.(mp4|webm|mov|m4v|mkv)$/i.test(f.name));
@@ -209,6 +234,7 @@ export default function MediaManagerPage() {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -310,10 +336,14 @@ export default function MediaManagerPage() {
         }}
       >
         <p className="text-lg font-medium">
-          {uploading ? "Uploading…" : "Drop images or videos here"}
+          {uploading
+            ? uploadProgress || "Uploading…"
+            : "Drop images or videos here"}
         </p>
         <p className="prose-muted mt-2 text-sm">
-          Images: JPG PNG WEBP GIF · Videos: MP4 WEBM MOV · max 200MB each
+          Images: JPG PNG WEBP GIF · Videos: MP4 WEBM MOV ·{" "}
+          <strong className="text-foreground/80">up to 5 GB per file</strong>{" "}
+          (large videos upload straight to cloud)
         </p>
         <label className="btn-primary mt-6 inline-flex cursor-pointer">
           {uploading ? "Please wait…" : "Choose files"}

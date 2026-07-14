@@ -11,7 +11,7 @@ export function blobEnabled(): boolean {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 
-function blobPath(
+export function blobPath(
   companionId: string,
   kind: MediaKind,
   fileName: string,
