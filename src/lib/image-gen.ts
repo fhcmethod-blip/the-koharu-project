@@ -67,22 +67,31 @@ function buildNsfwPrompt(opts: {
     user =
       process.env.FOOOCUS_DEFAULT_SCENE ||
       process.env.PONY_DEFAULT_SCENE ||
-      "nude selfie, bedroom, explicit nsfw, looking at viewer, sultry expression, detailed body";
+      "fully nude hardcore sex, penetration, explicit genitals, side angle, eyes closed in pleasure, not looking at camera, not a selfie";
   }
 
   if (/\b(nude|nudes|naked|sex|fuck|pussy|tits|ass)\b/i.test(opts.userPrompt)) {
-    user = `${user}, explicit nsfw, uncensored, detailed nude body`;
+    user = `${user}, fully nude, explicit nsfw, uncensored, detailed genitals, sexual act`;
+  }
+
+  // Avoid default eye-contact selfie bias unless user asked
+  if (
+    !/\b(selfie|looking at (me|viewer|camera)|eye contact)\b/i.test(
+      opts.userPrompt,
+    )
+  ) {
+    user = `${user}, cinematic angle, averted gaze or eyes closed, not a selfie, not looking at viewer`;
   }
 
   const prompt = [
     process.env.FOOOCUS_PROMPT_PREFIX ||
-      "nsfw, explicit, uncensored, adult woman, 18+",
+      "nsfw, explicit, uncensored, hardcore, erotic, adult woman, 18+",
     opts.companionName,
-    "1girl, solo, mature female",
+    "1girl, mature female",
     opts.appearance.replace(/\s+/g, " ").slice(0, 280),
     user,
     process.env.FOOOCUS_PROMPT_SUFFIX ||
-      "highly detailed, beautiful face, realistic skin, seductive",
+      "highly detailed, beautiful face, realistic skin, detailed anatomy, pornographic",
   ]
     .filter(Boolean)
     .join(", ");
@@ -92,9 +101,10 @@ function buildNsfwPrompt(opts: {
     process.env.PONY_NEGATIVE ||
     [
       "child, loli, shota, underage, young, kid, toddler, teen, little girl",
+      "looking at viewer, eye contact, selfie, phone selfie, front-facing camera",
       "worst quality, low quality, blurry, bad anatomy, bad hands",
       "text, watermark, logo, censored, bar censor, mosaic censoring",
-      "multiple girls, 2girls, male focus",
+      "clothed, lingerie only, covered nipples, covered pussy",
     ].join(", ");
 
   return { prompt, negative };
