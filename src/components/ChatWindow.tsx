@@ -76,6 +76,7 @@ export function ChatWindow({ character }: { character: Character }) {
           if (!job.id) throw new Error("No job id from server");
           const done = await waitForImageJob(job.id, {
             timeoutMs: 240_000,
+            token: job.token,
             onTick: (s) =>
               setStatusLine(
                 `${character.name} is generating a pic… (${s || "working"})`,
