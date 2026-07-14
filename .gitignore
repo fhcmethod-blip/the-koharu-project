@@ -50,3 +50,9 @@ next-env.d.ts
 /scripts/_genbody.json
 /scripts/_run_bridge.bat
 build-out.txt
+.vercel
+.env*
+
+scripts/_web_*.mp4
+scripts/*.mp4
+
