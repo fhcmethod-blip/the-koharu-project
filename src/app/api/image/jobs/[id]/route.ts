@@ -5,7 +5,9 @@ export const maxDuration = 30;
 
 /**
  * GET /api/image/jobs/[id]
- * Poll Fooocus bridge job. When done, returns imageUrl (data URL).
+ * Poll Fooocus bridge job. When done, returns imageUrl pointing at the
+ * public bridge (file URL) — does NOT pull multi-MB base64 through Next.js
+ * (that was crashing the local site during image gen).
  */
 export async function GET(
   _req: NextRequest,
@@ -33,8 +35,10 @@ export async function GET(
     const data = (await res.json().catch(() => ({}))) as {
       status?: string;
       error?: string;
-      base64?: string;
       detail?: string;
+      image_url?: string;
+      token?: string;
+      base64?: string;
     };
 
     if (!res.ok) {
@@ -44,14 +48,32 @@ export async function GET(
       );
     }
 
-    if (data.status === "done" && data.base64) {
-      // Prefer data URL so Vercel doesn't need disk
-      const imageUrl = `data:image/png;base64,${data.base64}`;
+    if (data.status === "done") {
+      // Prefer bridge file URL (tiny JSON). Fallback to base64 only if old bridge.
+      let imageUrl: string | undefined;
+      if (data.image_url) {
+        imageUrl = data.image_url.startsWith("http")
+          ? data.image_url
+          : `${base}${data.image_url.startsWith("/") ? "" : "/"}${data.image_url}`;
+      } else if (data.token) {
+        imageUrl = `${base}/v1/jobs/${encodeURIComponent(id)}/image?t=${encodeURIComponent(data.token)}`;
+      } else if (data.base64) {
+        imageUrl = `data:image/png;base64,${data.base64}`;
+      }
+
+      if (imageUrl) {
+        return NextResponse.json({
+          ok: true,
+          status: "done",
+          imageUrl,
+          source: "fooocus",
+        });
+      }
+
       return NextResponse.json({
-        ok: true,
-        status: "done",
-        imageUrl,
-        source: "fooocus",
+        ok: false,
+        status: "error",
+        error: "Job done but no image URL from bridge",
       });
     }
 

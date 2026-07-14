@@ -59,7 +59,8 @@ export async function POST(req: NextRequest) {
         sharpness: built.config.sharpness,
         guidance_scale: built.config.cfg,
         base_model_name: process.env.FOOOCUS_MODEL || built.config.model,
-        require_base64: true,
+        // File URL path — avoid multi-MB base64 through Vercel/Next (crashes)
+        require_base64: false,
       }),
       signal: AbortSignal.timeout(30_000),
     });

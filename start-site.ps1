@@ -1,5 +1,6 @@
 # The Koharu Project - start Next.js on port 8000 for Cloudflare Tunnel
 # Safe to run multiple times (skips if already listening).
+# Prefer production (next start) when a build exists - more stable than next dev.
 
 $ErrorActionPreference = "Continue"
 $ProjectDir = "C:\Users\Rob_k\OneDrive\Desktop\kohar"
@@ -43,6 +44,15 @@ function Test-PortOpen {
   }
 }
 
+function Test-HttpAlive {
+  try {
+    $r = Invoke-WebRequest -Uri "http://${HostAddr}:${Port}/" -UseBasicParsing -TimeoutSec 5
+    return ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500)
+  } catch {
+    return $false
+  }
+}
+
 Write-Log "=== start-site.ps1 begin ==="
 Write-Log "npm=$Npm node=$Node"
 
@@ -51,14 +61,12 @@ if (-not (Test-Path $ProjectDir)) {
   exit 1
 }
 
-# Old blog must not steal the port
 try {
   Disable-ScheduledTask -TaskName "BlogWebServer" -ErrorAction SilentlyContinue | Out-Null
 } catch {
   # ignore
 }
 
-# Kill non-node squatters on 8000 (e.g. python http.server)
 try {
   $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
   foreach ($l in @($listeners)) {
@@ -76,8 +84,20 @@ try {
 }
 
 if (Test-PortOpen -p $Port) {
-  Write-Log "Port $Port already listening - nothing to do"
-  exit 0
+  if (Test-HttpAlive) {
+    Write-Log "Port $Port already healthy - nothing to do"
+    exit 0
+  }
+  Write-Log "Port $Port listening but HTTP dead - restarting node on that port"
+  try {
+    $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    foreach ($l in @($listeners)) {
+      Stop-Process -Id $l.OwningProcess -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Seconds 2
+  } catch {
+    # ignore
+  }
 }
 
 if (-not (Test-Path $Npm)) {
@@ -86,20 +106,30 @@ if (-not (Test-Path $Npm)) {
 }
 
 Set-Location $ProjectDir
-Write-Log "Starting Next.js: npm run dev -- -p $Port -H $HostAddr"
 
-$argList = @("run", "dev", "--", "-p", "$Port", "-H", $HostAddr)
+$hasBuild = Test-Path (Join-Path $ProjectDir ".next\BUILD_ID")
+if ($hasBuild) {
+  Write-Log "Starting Next.js production: next start -p $Port -H $HostAddr"
+  $argList = @("run", "start", "--", "-p", "$Port", "-H", $HostAddr)
+} else {
+  Write-Log "No .next build - starting dev: next dev -p $Port -H $HostAddr"
+  $argList = @("run", "dev", "--", "-p", "$Port", "-H", $HostAddr)
+}
+
 $procInfo = Start-Process -FilePath $Npm -ArgumentList $argList -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru
-Write-Log "Launched npm pid=$($procInfo.Id)"
+Write-Log "Launched npm pid=$($procInfo.Id) mode=$(if ($hasBuild) { 'production' } else { 'dev' })"
 
-# Wait up to ~60s for listen
-for ($i = 1; $i -le 30; $i++) {
+for ($i = 1; $i -le 45; $i++) {
   Start-Sleep -Seconds 2
   if (Test-PortOpen -p $Port) {
     Write-Log "SUCCESS: port $Port is listening after $($i * 2)s"
     exit 0
   }
+  if ($procInfo.HasExited) {
+    Write-Log "ERROR: npm/next exited early code=$($procInfo.ExitCode)"
+    exit 1
+  }
 }
 
-Write-Log "WARNING: port $Port not listening after 60s - check logs or run start-site.bat manually"
+Write-Log "WARNING: port $Port not listening after 90s - run start-site.bat manually to see errors"
 exit 1

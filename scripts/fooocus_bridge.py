@@ -29,6 +29,7 @@ from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -128,7 +129,11 @@ class GenBody(BaseModel):
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    if request.url.path in ("/health", "/", "/docs", "/openapi.json"):
+    path = request.url.path
+    # Public: health + finished job images (unguessable job id + token)
+    if path in ("/health", "/", "/docs", "/openapi.json"):
+        return await call_next(request)
+    if path.startswith("/v1/jobs/") and path.endswith("/image"):
         return await call_next(request)
     if BRIDGE_SECRET:
         secret = request.headers.get("x-bridge-secret") or request.query_params.get(
@@ -218,30 +223,45 @@ def run_generate(body: GenBody) -> dict:
         picks = new_files[-max(1, data[7]) :]
         images_meta = []
         for p in picks:
-            raw = p.read_bytes()
-            b64 = base64.b64encode(raw).decode("ascii")
-            images_meta.append({"base64": b64, "path": str(p), "name": p.name})
+            entry = {"path": str(p), "name": p.name}
+            if body.require_base64:
+                raw = p.read_bytes()
+                entry["base64"] = base64.b64encode(raw).decode("ascii")
+            images_meta.append(entry)
 
-        return {
+        out = {
             "ok": True,
             "images": images_meta,
             "result": images_meta,
-            "base64": images_meta[-1]["base64"],
+            "file_path": str(picks[-1]),
+            "file_name": picks[-1].name,
         }
+        if body.require_base64 and images_meta:
+            out["base64"] = images_meta[-1].get("base64")
+        return out
 
 
 def _job_worker(job_id: str, body: GenBody):
     try:
         with _jobs_lock:
             _jobs[job_id]["status"] = "running"
+        # Prefer file path over base64 — keeps RAM low (fixes Next/site crashes)
+        body.require_base64 = False
         result = run_generate(body)
         with _jobs_lock:
             if result.get("ok"):
                 _jobs[job_id].update(
                     {
                         "status": "done",
-                        "base64": result.get("base64"),
-                        "images": result.get("images"),
+                        "file_path": result.get("file_path"),
+                        "file_name": result.get("file_name"),
+                        "images": [
+                            {
+                                "path": i.get("path"),
+                                "name": i.get("name"),
+                            }
+                            for i in (result.get("images") or [])
+                        ],
                         "finished_at": time.time(),
                     }
                 )
@@ -264,16 +284,18 @@ def _job_worker(job_id: str, body: GenBody):
 @app.post("/v1/jobs")
 def start_job(body: GenBody):
     job_id = uuid.uuid4().hex
+    token = uuid.uuid4().hex
     with _jobs_lock:
         _jobs[job_id] = {
             "id": job_id,
+            "token": token,
             "status": "queued",
             "created_at": time.time(),
             "prompt": body.prompt[:200],
         }
     t = threading.Thread(target=_job_worker, args=(job_id, body), daemon=True)
     t.start()
-    return {"ok": True, "id": job_id, "status": "queued"}
+    return {"ok": True, "id": job_id, "token": token, "status": "queued"}
 
 
 @app.get("/v1/jobs/{job_id}")
@@ -282,17 +304,45 @@ def get_job(job_id: str):
         job = _jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    # Don't bloat poll responses until done
+    # Lightweight poll — never ship multi-MB base64 through the app server
     out = {
         "ok": True,
         "id": job_id,
         "status": job["status"],
         "error": job.get("error"),
+        "token": job.get("token"),
     }
     if job["status"] == "done":
-        out["base64"] = job.get("base64")
-        out["images"] = job.get("images")
+        tok = job.get("token") or ""
+        out["image_url"] = f"/v1/jobs/{job_id}/image?t={tok}"
+        out["file_name"] = job.get("file_name")
     return out
+
+
+@app.get("/v1/jobs/{job_id}/image")
+def get_job_image(job_id: str, t: str = ""):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("token") and t != job.get("token"):
+        raise HTTPException(status_code=401, detail="Invalid image token")
+    if job.get("status") != "done":
+        raise HTTPException(status_code=409, detail="Image not ready")
+    path = job.get("file_path")
+    if not path or not Path(path).is_file():
+        raise HTTPException(status_code=404, detail="Image file missing")
+    media = "image/png"
+    if str(path).lower().endswith((".jpg", ".jpeg")):
+        media = "image/jpeg"
+    elif str(path).lower().endswith(".webp"):
+        media = "image/webp"
+    return FileResponse(
+        path,
+        media_type=media,
+        filename=job.get("file_name") or Path(path).name,
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @app.post("/v1/generation/text-to-image")
