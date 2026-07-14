@@ -25,13 +25,16 @@ function publicFooocusBase(): string {
   return (process.env.NEXT_PUBLIC_FOOOCUS_API_URL || "").replace(/\/$/, "");
 }
 
-function bridgeAuthHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  const secret = process.env.NEXT_PUBLIC_FOOOCUS_BRIDGE_SECRET || "";
-  if (secret) headers["x-bridge-secret"] = secret;
-  return headers;
+function bridgeSecret(): string {
+  return process.env.NEXT_PUBLIC_FOOOCUS_BRIDGE_SECRET || "";
+}
+
+/** Secret in query string — avoids custom-header CORS preflight issues on mobile Safari. */
+function withSecret(url: string): string {
+  const secret = bridgeSecret();
+  if (!secret) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}secret=${encodeURIComponent(secret)}`;
 }
 
 async function startJobDirect(
@@ -39,10 +42,14 @@ async function startJobDirect(
   base: string,
   mode?: string,
 ): Promise<ImageJobStatus> {
-  const res = await fetch(`${base}/v1/jobs`, {
+  const url = withSecret(`${base}/v1/jobs`);
+  const res = await fetch(url, {
     method: "POST",
-    headers: bridgeAuthHeaders(),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(bridgeBody),
+    mode: "cors",
+    credentials: "omit",
+    cache: "no-store",
   });
   const data = (await res.json().catch(() => ({}))) as {
     id?: string;
@@ -63,12 +70,44 @@ async function startJobDirect(
   };
 }
 
-/** Start async Fooocus job (returns quickly). */
+/**
+ * Mobile-first image jobs:
+ * 1) Get full prompt from same-origin (prepareOnly — works even if Vercel→PC is blocked)
+ * 2) Browser → public tunnel with secret in query (phones work; custom headers often fail)
+ * 3) Fall back to full server job start if direct fails
+ */
 export async function startImageJob(
   companionId: string,
   prompt: string,
 ): Promise<ImageJobStatus> {
-  // Try Vercel API first (builds full NSFW prompt)
+  const publicBase = publicFooocusBase();
+
+  // Always get the built NSFW prompt from our API (same-origin — works on phones)
+  const prepRes = await fetch("/api/image/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ companionId, prompt, prepareOnly: true }),
+  });
+  const prep = (await prepRes.json().catch(() => ({}))) as {
+    bridgeBody?: Record<string, unknown>;
+    mode?: string;
+    publicBridgeUrl?: string;
+    error?: string;
+  };
+
+  const base = (prep.publicBridgeUrl || publicBase || "").replace(/\/$/, "");
+  const bridgeBody = prep.bridgeBody;
+
+  // Prefer browser → tunnel (PC and phone both use this when PC GPU is on)
+  if (base && bridgeBody && typeof window !== "undefined") {
+    try {
+      return await startJobDirect(bridgeBody, base, prep.mode);
+    } catch (directErr) {
+      console.warn("Direct bridge job failed, trying server:", directErr);
+    }
+  }
+
+  // Server path (Vercel → home) — works if tunnel allows datacenter IPs
   const res = await fetch("/api/image/jobs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -83,34 +122,21 @@ export async function startImageJob(
 
   if (res.ok && data.id) return data;
 
-  // Fallback: browser → home tunnel (Vercel often cannot reach your PC)
-  const base = data.publicBridgeUrl || publicFooocusBase();
-  if (base && data.bridgeBody) {
-    return startJobDirect(data.bridgeBody, base, data.mode);
-  }
-
-  // Last resort: prepare payload then direct
-  if (base) {
-    const prep = await fetch("/api/image/jobs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ companionId, prompt, prepareOnly: true }),
-    });
-    const p = (await prep.json().catch(() => ({}))) as {
-      bridgeBody?: Record<string, unknown>;
-      mode?: string;
-      publicBridgeUrl?: string;
-    };
-    const b = p.publicBridgeUrl || base;
-    if (p.bridgeBody) {
-      return startJobDirect(p.bridgeBody, b, p.mode);
-    }
+  // Last try: server returned bridgeBody on 502
+  const fallbackBase = (data.publicBridgeUrl || base || "").replace(/\/$/, "");
+  if (fallbackBase && (data.bridgeBody || bridgeBody)) {
+    return startJobDirect(
+      data.bridgeBody || bridgeBody!,
+      fallbackBase,
+      data.mode || prep.mode,
+    );
   }
 
   throw new Error(
     data.error ||
+      prep.error ||
       data.hint ||
-      `Image job failed (${res.status}). Is Fooocus + bridge running?`,
+      `Image job failed (${res.status}). On phone: keep PC awake with Fooocus + bridge.`,
   );
 }
 
@@ -124,17 +150,17 @@ export async function waitForImageJob(
   const publicBase = publicFooocusBase();
 
   while (Date.now() - start < timeoutMs) {
-    // Prefer browser → public bridge poll
+    // Prefer browser → public bridge (query secret — mobile-safe, no custom headers)
     if (publicBase && typeof window !== "undefined") {
       try {
-        const headers: Record<string, string> = {};
-        const secret = process.env.NEXT_PUBLIC_FOOOCUS_BRIDGE_SECRET || "";
-        if (secret) headers["x-bridge-secret"] = secret;
-
-        const res = await fetch(
+        const pollUrl = withSecret(
           `${publicBase}/v1/jobs/${encodeURIComponent(jobId)}`,
-          { headers, cache: "no-store" },
         );
+        const res = await fetch(pollUrl, {
+          mode: "cors",
+          credentials: "omit",
+          cache: "no-store",
+        });
         const data = (await res.json().catch(() => ({}))) as {
           status?: string;
           error?: string;
@@ -156,6 +182,7 @@ export async function waitForImageJob(
             imageUrl = `${publicBase}/v1/jobs/${encodeURIComponent(jobId)}/image?t=${encodeURIComponent(tok)}`;
           }
           if (imageUrl) {
+            // Keep external URL (small). Avoid data: URLs — they break mobile localStorage.
             return { ok: true, status: "done", imageUrl, id: jobId };
           }
         }
@@ -165,7 +192,7 @@ export async function waitForImageJob(
         await new Promise((r) => setTimeout(r, 2500));
         continue;
       } catch {
-        // fall through to server poll
+        // fall through to same-origin server poll
       }
     }
 
@@ -195,15 +222,28 @@ export async function generateReply(
   userText: string,
   opts?: { skipImage?: boolean; preloadedImageUrl?: string },
 ): Promise<ChatReply> {
+  // Don't send huge data-URL images back to the server from phones
+  let preloaded = opts?.preloadedImageUrl;
+  if (preloaded && preloaded.startsWith("data:") && preloaded.length > 50_000) {
+    preloaded = undefined;
+  }
+
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       character,
-      history,
+      history: history.map((m) => ({
+        ...m,
+        // strip huge data URLs from history on mobile payloads
+        imageUrl:
+          m.imageUrl && m.imageUrl.startsWith("data:") && m.imageUrl.length > 8000
+            ? undefined
+            : m.imageUrl,
+      })),
       userText,
       skipImage: opts?.skipImage ?? false,
-      preloadedImageUrl: opts?.preloadedImageUrl,
+      preloadedImageUrl: preloaded,
     }),
   });
 

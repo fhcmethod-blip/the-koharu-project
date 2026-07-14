@@ -214,8 +214,15 @@ export function ChatWindow({ character }: { character: Character }) {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={m.imageUrl}
-                  alt="Tease"
-                  className="mt-3 max-h-72 w-full rounded-xl object-cover"
+                  alt="Generated"
+                  loading="eager"
+                  decoding="async"
+                  referrerPolicy="no-referrer"
+                  className="mt-3 h-auto max-h-[70vh] w-full rounded-xl object-contain bg-black/30"
+                  onError={(e) => {
+                    const el = e.currentTarget;
+                    el.style.display = "none";
+                  }}
                 />
               )}
             </div>

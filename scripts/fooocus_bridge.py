@@ -45,12 +45,16 @@ DEFAULTS_PATH = Path(__file__).with_name("fooocus_fn67_defaults.json")
 FN_GET_TASK = 67
 FN_GENERATE = 68
 
-app = FastAPI(title="Koharu Fooocus Bridge", version="1.2.0")
+app = FastAPI(title="Koharu Fooocus Bridge", version="1.3.0")
+# CORS outermost so phones (Safari) get proper preflight + cross-origin responses
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origin_regex=".*",
+    allow_methods=["GET", "POST", "OPTIONS", "HEAD"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=86400,
 )
 
 _client = None
@@ -130,6 +134,9 @@ class GenBody(BaseModel):
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
+    # CORS preflight must never require auth (Safari / mobile is strict)
+    if request.method == "OPTIONS":
+        return await call_next(request)
     # Public: health + finished job images (unguessable job id + token)
     if path in ("/health", "/", "/docs", "/openapi.json"):
         return await call_next(request)
@@ -142,7 +149,16 @@ async def auth_middleware(request: Request, call_next):
         if secret != BRIDGE_SECRET:
             from fastapi.responses import JSONResponse
 
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            # Include CORS so mobile browsers surface the real error
+            return JSONResponse(
+                {"error": "Unauthorized"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "*",
+                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                },
+            )
     return await call_next(request)
 
 
