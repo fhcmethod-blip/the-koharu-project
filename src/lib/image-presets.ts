@@ -15,30 +15,76 @@ export type CompanionVisual = {
   preferredMode: ImageMode;
 };
 
+/**
+ * Strong visual fingerprints for image gen — each companion must read as a
+ * different person (hair, eyes, body, skin, fashion).
+ */
 export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
   koharu: {
     preferredMode: "lust",
-    look: "soft pretty face, warm eyes, approachable beauty, feminine body, soft breasts, adult woman 22",
+    look: [
+      "1girl, solo, adult woman 22, east asian",
+      "long straight black hair, soft bangs, warm brown eyes, oval face",
+      "soft pretty girlfriend face, light natural makeup",
+      "petite curvy body, soft breasts, narrow waist, fair warm skin",
+      "cute-sexy vibe, soft pink and black clothes when clothed",
+      "approachable beauty, NOT blonde, NOT pale gothic, NOT freckled blonde",
+    ].join(", "),
   },
   mira: {
     preferredMode: "realistic",
-    look: "elegant dominant woman, sharp eyes, confident expression, refined features, adult woman 28",
+    look: [
+      "1girl, solo, adult woman 28, elegant european-mixed features",
+      "sleek dark brown shoulder-length hair, often half-up, hazel-green eyes",
+      "defined cheekbones, poised confident face, expensive minimal makeup",
+      "tall lean hourglass, long legs, refined medium breasts, olive-fair skin",
+      "black silk, tailored, wine lipstick when made up",
+      "dominant elegance, NOT cute, NOT blonde, NOT freckled, NOT petite soft",
+    ].join(", "),
   },
   nova: {
     preferredMode: "lust",
-    look: "playful bratty beauty, mischievous smile, energetic body, adult woman 24",
+    look: [
+      "1girl, solo, adult woman 24",
+      "messy wavy honey-blonde hair dark roots, bright blue-green eyes, freckles",
+      "wide playful grin, expressive bratty face",
+      "athletic fit body, toned abs vibe, strong thighs, smaller athletic breasts, sun-kissed skin",
+      "crop top streetwear gym-hot energy, gold jewelry",
+      "chaotic hot, NOT black hair, NOT pale goth, NOT soft romantic redhead",
+    ].join(", "),
   },
   elena: {
     preferredMode: "realistic",
-    look: "soft romantic beauty, gentle eyes, delicate features, intimate lighting, adult woman 26",
+    look: [
+      "1girl, solo, adult woman 26",
+      "long wavy auburn chestnut hair, soft green-grey eyes, full lips, light freckles",
+      "gentle romantic face, soft expression",
+      "soft full figure, plush curves, generous breasts, warm ivory skin",
+      "linen blouse long skirt bookish sensual fashion",
+      "quiet heat, NOT jet black hair, NOT athletic blonde, NOT sharp goth",
+    ].join(", "),
   },
   raven: {
     preferredMode: "realistic",
-    look: "dark seductive beauty, intense eyes, mysterious expression, stylish, adult woman 27",
+    look: [
+      "1girl, solo, adult woman 27",
+      "straight jet-black hair sleek, pale cool skin, icy grey eyes, dark eyeliner",
+      "sharp seductive face, deep berry or black lipstick",
+      "tall slim, sharp shoulders, high small-medium breasts, long fingers",
+      "all-black leather sheer mesh silver rings expensive dark fashion",
+      "midnight edge, NOT blonde, NOT warm soft girlfriend, NOT freckled sunny",
+    ].join(", "),
   },
   yuki: {
     preferredMode: "pony",
-    look: "soft shy beauty, blushing, gentle expression, adult woman 23, cute but mature",
+    look: [
+      "1girl, solo, adult woman 23, mature female, 18+",
+      "light ash-brown soft bob or half-up hair, large warm amber-brown eyes",
+      "round soft adult face, easy blush on cheeks, shy smile",
+      "petite short height, soft slim-curvy body, modest soft breasts, pale peach skin",
+      "pastel cardigan cute adult fashion, NOT loli, NOT childlike proportions",
+      "sweet melt, NOT black long hair koharu, NOT blonde nova, NOT goth raven",
+    ].join(", "),
   },
 };
 
@@ -279,17 +325,23 @@ export function buildCompanionImagePrompt(opts: {
   // Global hardcore polish
   scene = `${scene}, completely naked, bare breasts, nipples, bare pussy, explicit sex, erotic, pornographic quality`;
 
+  // Prefer hard visual fingerprint so each companion does not collapse to the same face
   const look =
     visual?.look ||
-    opts.appearance.replace(/\s+/g, " ").slice(0, 200) ||
+    opts.appearance.replace(/\s+/g, " ").slice(0, 320) ||
     "beautiful adult woman";
+  const appearanceExtra = opts.appearance
+    ? opts.appearance.replace(/\s+/g, " ").slice(0, 220)
+    : "";
 
   const prompt = [
     config.promptPrefix,
     opts.companionName,
-    "1girl, mature female, 18+",
+    "1girl, solo, mature female, 18+, distinct character design",
     look,
+    appearanceExtra,
     scene,
+    "same character consistency, unique face for this companion only",
     "masterpiece, best quality, detailed skin, detailed face, detailed body",
   ]
     .filter(Boolean)
