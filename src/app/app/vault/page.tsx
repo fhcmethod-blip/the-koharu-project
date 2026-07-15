@@ -13,6 +13,7 @@ import {
   tierBlurb,
   tierLabels,
 } from "@/lib/vault";
+import { localVaultList } from "@/lib/vault-local-store";
 
 type MediaFile = {
   id: string;
@@ -23,6 +24,14 @@ type MediaFile = {
   source?: string;
   size?: number;
 };
+
+function mergeMedia(server: MediaFile[], local: MediaFile[]): MediaFile[] {
+  const map = new Map<string, MediaFile>();
+  for (const item of local) map.set(item.name, { ...item, source: "local" });
+  // Server/cloud wins over device-only
+  for (const item of server) map.set(item.name, { ...item, source: item.source || "server" });
+  return Array.from(map.values());
+}
 
 function LockedPanel({
   title,
@@ -94,33 +103,56 @@ export default function VaultPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      // Free / locked users: do not pull media lists at all
+      // Free / locked users: no media at all
       if (!canPhotos && !canVideos) {
         setPhotos([]);
         setVideos([]);
         return;
       }
 
-      const res = await fetch(
-        `/api/media/list?companion=${encodeURIComponent(companion)}&kind=all`,
-        {
-          headers: {
-            "x-user-email": user?.email || "",
-            "x-user-tier": user?.tier || "free",
+      let lib: MediaFile[] = [];
+      let vid: MediaFile[] = [];
+
+      try {
+        const res = await fetch(
+          `/api/media/list?companion=${encodeURIComponent(companion)}&kind=all`,
+          {
+            headers: {
+              "x-user-email": user?.email || "",
+              "x-user-tier": user?.tier || "free",
+            },
+            credentials: "same-origin",
           },
-          credentials: "same-origin",
-        },
-      );
-      const d = await res.json();
-      if (!res.ok) {
-        setPhotos([]);
-        setVideos([]);
-        return;
+        );
+        const d = await res.json();
+        if (res.ok) {
+          if (d.access?.library) lib = d.items?.library || [];
+          if (d.access?.videos) vid = d.items?.videos || [];
+        }
+      } catch {
+        /* server empty / offline */
       }
 
-      // Trust server access flags
-      const lib = d.access?.library ? d.items?.library || [] : [];
-      const vid = d.access?.videos ? d.items?.videos || [] : [];
+      // Same source as Media Manager: include this-device vault files for entitled users
+      // (so a video you see in Manager also appears here when VIP)
+      try {
+        const local = await localVaultList(companion, "all");
+        if (canPhotos) {
+          const localPhotos = local
+            .filter((i) => i.kind === "library")
+            .map((i) => ({ ...i, source: "local" as const }));
+          lib = mergeMedia(lib, localPhotos);
+        }
+        if (canVideos) {
+          const localVideos = local
+            .filter((i) => i.kind === "videos")
+            .map((i) => ({ ...i, source: "local" as const }));
+          vid = mergeMedia(vid, localVideos);
+        }
+      } catch {
+        /* no idb */
+      }
+
       setPhotos(canPhotos ? lib : []);
       setVideos(canVideos ? vid : []);
     } catch {
@@ -316,7 +348,13 @@ export default function VaultPage() {
                   className="aspect-video object-contain"
                 />
                 <div className="flex items-center justify-between gap-2 px-3 py-2">
-                  <p className="truncate text-xs text-muted">{vid.name}</p>
+                  <p className="truncate text-xs text-muted">
+                    {vid.name}
+                    {vid.source === "local" ||
+                    (vid.url && vid.url.startsWith("blob:")) ? (
+                      <span className="ml-2 text-amber-300/90">· this device</span>
+                    ) : null}
+                  </p>
                   <button
                     type="button"
                     className="shrink-0 text-[11px] text-accent-soft hover:underline"

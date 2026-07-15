@@ -67,19 +67,26 @@ export default function MediaManagerPage() {
       try {
         const res = await fetch(
           `/api/media/list?companion=${encodeURIComponent(companion)}&kind=all`,
+          {
+            headers: {
+              "x-user-email": user?.email || "",
+              "x-user-tier": user?.tier || "free",
+            },
+            credentials: "same-origin",
+          },
         );
         const data = await res.json();
         if (res.ok) {
           const tag = (x: MediaItem): MediaItem => ({
             ...x,
             source: "server" as const,
-            // normalize size if missing
             size: x.size || 0,
             mtime: x.mtime || 0,
           });
-          library = (data.items?.library || []).map(tag);
-          videos = (data.items?.videos || []).map(tag);
-          generated = (data.items?.generated || []).map(tag);
+          // Respect paywall flags from API
+          library = (data.access?.library !== false ? data.items?.library || [] : []).map(tag);
+          videos = (data.access?.videos !== false ? data.items?.videos || [] : []).map(tag);
+          generated = (data.access?.generated !== false ? data.items?.generated || [] : []).map(tag);
         }
       } catch {
         /* server media unavailable (common on Vercel) */
@@ -115,7 +122,7 @@ export default function MediaManagerPage() {
     } finally {
       setLoading(false);
     }
-  }, [companion, tab]);
+  }, [companion, tab, user?.email, user?.tier]);
 
   useEffect(() => {
     if (ready && !user) router.replace("/login?next=/app/media");
