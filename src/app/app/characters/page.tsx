@@ -4,35 +4,68 @@ import { useMemo, useState } from "react";
 import { CompanionCard } from "@/components/CompanionCard";
 import { companionTags, listCharacters } from "@/lib/characters";
 
+type GenderFilter = "all" | "female" | "male";
+
 export default function CharactersPage() {
   const [tag, setTag] = useState<string>("all");
+  const [gender, setGender] = useState<GenderFilter>("all");
   const all = listCharacters();
 
   const filtered = useMemo(() => {
-    if (tag === "all") return all;
-    return all.filter((c) => c.tags.includes(tag));
-  }, [all, tag]);
+    let list = all;
+    if (gender !== "all") list = list.filter((c) => c.gender === gender);
+    if (tag !== "all") list = list.filter((c) => c.tags.includes(tag));
+    return list;
+  }, [all, tag, gender]);
+
+  const girls = all.filter((c) => c.gender === "female").length;
+  const guys = all.filter((c) => c.gender === "male").length;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
       <h1 className="text-3xl font-semibold tracking-tight">Companions</h1>
       <p className="prose-muted mt-2 max-w-2xl text-sm">
-        <strong className="text-foreground">Koharu</strong> is the star of The Koharu
-        Project. Everyone else is a different flavor of the same 18+ playground —
-        pick a vibe and start chatting.
+        <strong className="text-foreground">{girls} women</strong> and{" "}
+        <strong className="text-foreground">{guys} men</strong> — same 18+ playground.
+        Pick a vibe and start chatting.
       </p>
 
+      {/* Gender filters */}
       <div className="mt-6 flex flex-wrap gap-2">
+        {(
+          [
+            ["all", `All (${all.length})`],
+            ["female", `Women (${girls})`],
+            ["male", `Men (${guys})`],
+          ] as [GenderFilter, string][]
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setGender(id)}
+            className={`rounded-full px-4 py-2 text-sm font-medium ${
+              gender === id
+                ? "bg-accent text-white"
+                : "border border-card-border text-muted hover:text-foreground"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tag filters */}
+      <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => setTag("all")}
           className={`rounded-full px-3 py-1.5 text-xs font-medium ${
             tag === "all"
-              ? "bg-accent text-white"
+              ? "bg-white/15 text-foreground"
               : "border border-card-border text-muted hover:text-foreground"
           }`}
         >
-          All ({all.length})
+          All tags
         </button>
         {companionTags.map((t) => (
           <button
@@ -41,7 +74,7 @@ export default function CharactersPage() {
             onClick={() => setTag(t)}
             className={`rounded-full px-3 py-1.5 text-xs font-medium ${
               tag === t
-                ? "bg-accent text-white"
+                ? "bg-white/15 text-foreground"
                 : "border border-card-border text-muted hover:text-foreground"
             }`}
           >
@@ -58,7 +91,7 @@ export default function CharactersPage() {
 
       {filtered.length === 0 && (
         <p className="prose-muted mt-10 text-center text-sm">
-          No companions with that tag.
+          No companions match that filter.
         </p>
       )}
     </div>

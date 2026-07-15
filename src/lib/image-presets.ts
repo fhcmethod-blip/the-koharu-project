@@ -13,6 +13,7 @@ export type CompanionVisual = {
   look: string;
   /** Prefer which checkpoint mode */
   preferredMode: ImageMode;
+  gender: "female" | "male";
 };
 
 /**
@@ -21,6 +22,7 @@ export type CompanionVisual = {
  */
 export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
   koharu: {
+    gender: "female",
     preferredMode: "lust",
     look: [
       "1girl, solo, adult woman 22, east asian",
@@ -32,6 +34,7 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
     ].join(", "),
   },
   mira: {
+    gender: "female",
     preferredMode: "realistic",
     look: [
       "1girl, solo, adult woman 28, elegant european-mixed features",
@@ -43,6 +46,7 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
     ].join(", "),
   },
   nova: {
+    gender: "female",
     preferredMode: "lust",
     look: [
       "1girl, solo, adult woman 24",
@@ -54,6 +58,7 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
     ].join(", "),
   },
   elena: {
+    gender: "female",
     preferredMode: "realistic",
     look: [
       "1girl, solo, adult woman 26",
@@ -65,6 +70,7 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
     ].join(", "),
   },
   raven: {
+    gender: "female",
     preferredMode: "realistic",
     look: [
       "1girl, solo, adult woman 27",
@@ -76,6 +82,7 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
     ].join(", "),
   },
   yuki: {
+    gender: "female",
     preferredMode: "pony",
     look: [
       "1girl, solo, adult woman 23, mature female, 18+",
@@ -84,6 +91,75 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
       "petite short height, soft slim-curvy body, modest soft breasts, pale peach skin",
       "pastel cardigan cute adult fashion, NOT loli, NOT childlike proportions",
       "sweet melt, NOT black long hair koharu, NOT blonde nova, NOT goth raven",
+    ].join(", "),
+  },
+  // Male companions
+  kai: {
+    gender: "male",
+    preferredMode: "lust",
+    look: [
+      "1boy, solo, adult man 24, east asian male",
+      "messy black hair long on top, warm brown eyes, soft jaw light stubble",
+      "handsome boyfriend face, friendly hot",
+      "lean athletic body, toned arms, light fair-warm skin, male body",
+      "hoodie jeans simple chain when clothed",
+      "NOT woman, NOT feminine body, NOT blonde, NOT bulk bodybuilder",
+    ].join(", "),
+  },
+  cassian: {
+    gender: "male",
+    preferredMode: "realistic",
+    look: [
+      "1boy, solo, adult man 31",
+      "short dark hair silver temples, steel-blue eyes, sharp jaw stubble",
+      "poised dominant male face, expensive calm",
+      "tall broad shoulders, lean muscular, defined chest, olive-fair skin",
+      "charcoal shirt black trousers watch",
+      "NOT woman, NOT pretty-boy soft, NOT blonde gym brat",
+    ].join(", "),
+  },
+  jax: {
+    gender: "male",
+    preferredMode: "lust",
+    look: [
+      "1boy, solo, adult man 25",
+      "tousled dirty-blonde hair, green eyes, cocky smirk, light freckles",
+      "athletic muscular male, strong arms chest, sun-kissed skin",
+      "tank top ripped jeans sneakers vibe",
+      "NOT woman, NOT black hair elegant, NOT pale goth",
+    ].join(", "),
+  },
+  theo: {
+    gender: "male",
+    preferredMode: "realistic",
+    look: [
+      "1boy, solo, adult man 27",
+      "soft wavy brown hair, hazel eyes, optional glasses, gentle face",
+      "slim lean build, long fingers, warm ivory skin, light chest hair",
+      "flannel linen shirt romantic male",
+      "NOT woman, NOT bulk muscle, NOT jet-black dangerous look",
+    ].join(", "),
+  },
+  damon: {
+    gender: "male",
+    preferredMode: "realistic",
+    look: [
+      "1boy, solo, adult man 29",
+      "black hair slicked back, pale cool skin, ice-grey eyes, sharp features",
+      "tall lean muscular V-torso, light dark chest hair",
+      "black shirt leather jacket silver rings",
+      "NOT woman, NOT golden boy, NOT soft freckled blonde",
+    ].join(", "),
+  },
+  ren: {
+    gender: "male",
+    preferredMode: "pony",
+    look: [
+      "1boy, solo, adult man 23, mature male, 18+",
+      "soft black messy hair, large dark eyes, easy blush, adult handsome face",
+      "slim soft-lean male body, smooth light skin, not hyper muscular",
+      "soft sweater neat shirt",
+      "NOT woman, NOT shota, NOT childlike, NOT underage",
     ].join(", "),
   },
 };
@@ -149,26 +225,32 @@ export const MODE_CONFIG: Record<ImageMode, ModeConfig> = {
   },
 };
 
-/** Rotating full-explicit scenes — NO forced eye contact / selfie framing */
-const EXPLICIT_SCENES = [
-  "fully nude, legs spread on bed, pussy visible, aroused, from above angle, eyes closed in pleasure, moaning expression",
-  "fully nude, doggystyle pose on bed, ass and pussy visible from behind, arched back, face turned to side, hard sex",
-  "fully nude, missionary sex with male partner, legs open, penetration, side angle, head tilted back in ecstasy",
-  "fully nude, riding cowgirl, breasts bouncing, penetration visible, camera from side-low angle, eyes half-closed",
-  "fully nude, blowjob, kneeling, oral sex, cock in mouth, side profile view, saliva, erotic",
+/** Female explicit scenes — NO forced eye contact / selfie framing */
+const EXPLICIT_SCENES_F = [
+  "fully nude, legs spread on bed, pussy visible, aroused, from above angle, eyes closed in pleasure",
+  "fully nude, doggystyle pose on bed, ass and pussy visible from behind, arched back, face turned to side",
+  "fully nude, missionary sex, legs open, penetration, side angle, head tilted back in ecstasy",
+  "fully nude, riding cowgirl, breasts bouncing, penetration visible, side-low angle, eyes half-closed",
+  "fully nude, blowjob, kneeling, oral sex, cock in mouth, side profile, saliva",
   "fully nude, bent over table, from behind, spread ass, pussy exposed, looking over shoulder not at camera",
-  "fully nude, missionary masturbation, fingers in pussy, legs up, overhead angle, pleasure face eyes closed",
-  "fully nude, against wall standing sex, leg up, penetration, side three-quarter view, sweaty skin",
-  "fully nude, prone bone sex face down on sheets, ass up, from behind angle, gripping sheets",
-  "fully nude, 69 oral sex, mutual, side view, detailed bodies, explicit",
-  "fully nude, reverse cowgirl, ass facing viewer-ish from behind-side, penetration, arched back, face away",
-  "fully nude, lying on side, spooning sex, penetration, intimate side angle, soft moans eyes shut",
-  "fully nude, on knees presenting, face down ass up, pussy and asshole visible, rear angle, submissive",
-  "fully nude, sitting on edge of bed, thighs open, fingering herself, three-quarter side view, not looking at camera",
-  "fully nude, deepthroat oral, hands on cock, extreme close side angle, tears of pleasure, explicit",
-  "fully nude, standing doggy against dresser, from side-behind, hard fucking, bouncing body",
-  "fully nude, spread eagle on bed, full body from foot of bed, wet pussy, nipples hard, head rolled to side",
-  "fully nude, handjob and kissing neck, partner out of frame mostly, intimate side angle, bedroom",
+  "fully nude, masturbation, fingers in pussy, legs up, overhead angle, pleasure face eyes closed",
+  "fully nude, against wall standing sex, leg up, penetration, side three-quarter view",
+  "fully nude, on knees presenting, face down ass up, rear angle, submissive",
+  "fully nude, sitting on edge of bed, thighs open, three-quarter side view, not looking at camera",
+];
+
+/** Male explicit scenes */
+const EXPLICIT_SCENES_M = [
+  "fully nude, adult man, hard cock, lying on bed, from side angle, eyes closed in pleasure",
+  "fully nude, adult man, missionary sex with partner, side angle, muscular back, thrusting",
+  "fully nude, adult man, doggystyle from side-behind, hands on hips, hard sex",
+  "fully nude, adult man receiving blowjob, sitting on edge of bed, head back, side profile",
+  "fully nude, adult man, standing sex against wall, partner legs up, side three-quarter",
+  "fully nude, adult man, masturbation, hand on cock, bedroom, cinematic side angle not selfie",
+  "fully nude, adult man, cowgirl partner riding him, low side angle, abs and chest visible",
+  "fully nude, adult man, prone bone from behind-side, gripping sheets",
+  "fully nude, adult man, 69 oral, side view, explicit",
+  "fully nude, adult man, handjob from partner, kissing neck, intimate side angle",
 ];
 
 /** Softer but still nude scenes if user is mild (rare) */
@@ -283,6 +365,8 @@ export function buildCompanionImagePrompt(opts: {
 }): { prompt: string; negative: string; config: ModeConfig } {
   const config = MODE_CONFIG[opts.mode];
   const visual = COMPANION_VISUALS[opts.companionId];
+  const gender = visual?.gender || "female";
+  const isMale = gender === "male";
   const raw = opts.userText || "";
   const selfie = wantsSelfieFraming(raw);
 
@@ -301,43 +385,48 @@ export function buildCompanionImagePrompt(opts: {
       scene,
     );
 
+  const scenePool = isMale ? EXPLICIT_SCENES_M : EXPLICIT_SCENES_F;
+
   if (bareRequest && !actTags) {
-    // Default: full explicit sex / nude act, varied angle — NOT camera stare
-    scene = pickScene(EXPLICIT_SCENES, `${opts.companionId}:${raw}`);
+    scene = pickScene(scenePool, `${opts.companionId}:${raw}`);
   } else if (bareRequest && actTags) {
     scene = actTags;
   } else {
     scene = [scene, actTags].filter(Boolean).join(", ");
-    // Always push full explicit unless user clearly asked clothed/lingerie only
     if (!/\b(lingerie|clothed|dressed|outfit|cosplay only)\b/i.test(raw)) {
-      scene = `${scene}, fully nude, explicit nsfw, uncensored, detailed genitals, sexual`;
+      scene = isMale
+        ? `${scene}, fully nude male, explicit nsfw, uncensored, detailed male genitals, sexual`
+        : `${scene}, fully nude, explicit nsfw, uncensored, detailed genitals, sexual`;
     }
   }
 
-  // Camera framing
   if (selfie) {
     scene = `${scene}, selfie, looking at viewer, eye contact, front facing, phone camera perspective`;
   } else {
-    // Explicitly steer away from default selfie bias models love
     scene = `${scene}, cinematic erotic angle, natural pose, averted gaze or eyes closed, not a selfie, not looking at camera`;
   }
 
-  // Global hardcore polish
-  scene = `${scene}, completely naked, bare breasts, nipples, bare pussy, explicit sex, erotic, pornographic quality`;
+  // Gender-specific nude polish
+  scene = isMale
+    ? `${scene}, completely naked man, bare chest, male abs or soft body, hard or soft cock, explicit sex, erotic, pornographic quality`
+    : `${scene}, completely naked, bare breasts, nipples, bare pussy, explicit sex, erotic, pornographic quality`;
 
-  // Prefer hard visual fingerprint so each companion does not collapse to the same face
   const look =
     visual?.look ||
     opts.appearance.replace(/\s+/g, " ").slice(0, 320) ||
-    "beautiful adult woman";
+    (isMale ? "handsome adult man" : "beautiful adult woman");
   const appearanceExtra = opts.appearance
     ? opts.appearance.replace(/\s+/g, " ").slice(0, 220)
     : "";
 
+  const genderTag = isMale
+    ? "1boy, solo, mature male, adult man 18+, distinct male character design"
+    : "1girl, solo, mature female, adult woman 18+, distinct character design";
+
   const prompt = [
     config.promptPrefix,
     opts.companionName,
-    "1girl, solo, mature female, 18+, distinct character design",
+    genderTag,
     look,
     appearanceExtra,
     scene,
@@ -347,8 +436,13 @@ export function buildCompanionImagePrompt(opts: {
     .filter(Boolean)
     .join(", ");
 
-  // If user wants selfie, strip anti-selfie negatives
   let negative = config.negative;
+  // Keep gender stable in negatives
+  if (isMale) {
+    negative = `${negative}, 1girl, woman, female, feminine body, breasts, pussy, loli, shota, young boy, underage`;
+  } else {
+    negative = `${negative}, 1boy, man, male focus, penis, shota, underage`;
+  }
   if (selfie) {
     negative = negative
       .replace(/\s*looking at viewer\s*,?/gi, " ")

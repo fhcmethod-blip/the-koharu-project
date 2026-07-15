@@ -22,6 +22,9 @@ export function CompanionCard({
               <span className="badge bg-black/30 text-foreground/80">
                 {character.age}
               </span>
+              <span className="badge bg-black/30 text-foreground/80">
+                {character.gender === "male" ? "Man" : "Woman"}
+              </span>
               {character.isFeatured && (
                 <span className="badge bg-accent/35 text-accent-soft">Star</span>
               )}

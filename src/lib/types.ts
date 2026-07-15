@@ -9,12 +9,16 @@ export type User = {
   createdAt: string;
 };
 
+export type CompanionGender = "female" | "male";
+
 /** Full companion profile used by UI + AI system prompts */
 export type Character = {
   id: string;
   name: string;
   /** Display age — always 18+ adults */
   age: number;
+  /** For filters + image-gen gender tags */
+  gender: CompanionGender;
   tagline: string;
   bio: string;
   /** Short one-liner for cards */
@@ -30,11 +34,11 @@ export type Character = {
   greeting: string;
   /** Physical / vibe description for AI immersion */
   appearance: string;
-  /** How she speaks */
+  /** How they speak */
   voice: string;
   /** Relationship framing toward the user */
   relationship: string;
-  /** Things she loves in chat / RP */
+  /** Things they love in chat / RP */
   likes: string[];
   /** Hard limits for this persona (still under global rules) */
   limits: string[];
