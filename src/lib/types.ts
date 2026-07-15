@@ -46,6 +46,10 @@ export type Character = {
   scenarioHooks: string[];
   /** Extra AI instructions unique to this character */
   aiNotes: string;
+  /** Public profile portrait path e.g. /companions/koharu.jpg */
+  avatarUrl?: string;
+  /** Optional wide cover image */
+  coverUrl?: string;
 };
 
 export type ChatMessage = {

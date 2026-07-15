@@ -4,7 +4,7 @@ import type { Character } from "./types";
  * Companion roster — single source of truth for UI + AI.
  * All characters are consenting adults (18+).
  */
-export const characters: Character[] = [
+const roster: Character[] = [
   {
     id: "koharu",
     name: "Koharu",
@@ -525,6 +525,17 @@ export const characters: Character[] = [
       "Adult soft-sub male only — never underage/shota framing. Eager and responsive. Escalate when led.",
   },
 ];
+
+/** Attach default avatar paths from /public/companions/{id}.jpg */
+function withAvatars(list: Character[]): Character[] {
+  return list.map((c) => ({
+    ...c,
+    avatarUrl: c.avatarUrl || `/companions/${c.id}.jpg`,
+    coverUrl: c.coverUrl || c.avatarUrl || `/companions/${c.id}.jpg`,
+  }));
+}
+
+export const characters: Character[] = withAvatars(roster);
 
 export function getCharacter(id: string): Character | undefined {
   return characters.find((c) => c.id === id);

@@ -177,10 +177,13 @@ export function ChatWindow({ character }: { character: Character }) {
     <div className="flex h-[calc(100vh-0px)] min-h-[520px] flex-col md:h-screen">
       <div className="flex items-center justify-between border-b border-card-border px-4 py-3 sm:px-6">
         <div className="flex items-center gap-3">
-          <div
-            className={`flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br ${character.gradient} text-lg font-semibold`}
-          >
-            {character.name[0]}
+          <div className="relative h-11 w-11 overflow-hidden rounded-2xl border border-white/10 bg-black/30">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={character.avatarUrl || `/companions/${character.id}.jpg`}
+              alt=""
+              className="h-full w-full object-cover object-top"
+            />
           </div>
           <div>
             <h1 className="font-semibold leading-tight">{character.name}</h1>

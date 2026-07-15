@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import type { Character } from "@/lib/types";
 
@@ -8,91 +9,105 @@ export function CompanionCard({
   character: Character;
   featured?: boolean;
 }) {
+  const avatar = character.avatarUrl || `/companions/${character.id}.jpg`;
+
   return (
     <article
-      className={`group overflow-hidden rounded-2xl border border-card-border bg-card/70 transition hover:border-accent/40 ${
+      className={`group overflow-hidden rounded-2xl border border-card-border bg-card/80 transition hover:border-accent/40 ${
         featured ? "sm:col-span-2" : ""
       }`}
     >
-      <div className={`bg-gradient-to-br ${character.gradient} p-6 sm:p-8`}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+      <div
+        className={`grid ${featured ? "sm:grid-cols-[280px_1fr]" : "grid-cols-1"}`}
+      >
+        {/* Profile image */}
+        <div
+          className={`relative overflow-hidden bg-gradient-to-br ${character.gradient} ${
+            featured ? "min-h-[280px] sm:min-h-full" : "aspect-[4/5] sm:aspect-[3/4]"
+          }`}
+        >
+          <Image
+            src={avatar}
+            alt={character.name}
+            fill
+            className="object-cover object-top transition duration-500 group-hover:scale-[1.03]"
+            sizes={featured ? "(max-width: 640px) 100vw, 280px" : "(max-width: 640px) 100vw, 50vw"}
+            priority={!!character.isFeatured}
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+          <div className="absolute bottom-0 left-0 right-0 p-4 sm:hidden">
+            <h2 className="text-xl font-semibold text-white">{character.name}</h2>
+            <p className="text-sm text-white/85">{character.tagline}</p>
+          </div>
+          <div className="absolute right-3 top-3 flex flex-wrap gap-1.5">
+            {character.isFeatured && (
+              <span className="badge bg-accent/90 text-white">Star</span>
+            )}
+            <span className="badge bg-black/55 text-white/90">
+              {character.gender === "male" ? "Man" : "Woman"}
+            </span>
+          </div>
+        </div>
+
+        {/* Details */}
+        <div className={`bg-gradient-to-br ${character.gradient} p-5 sm:p-6`}>
+          <div className="hidden sm:block">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xl font-semibold sm:text-2xl">{character.name}</h2>
               <span className="badge bg-black/30 text-foreground/80">
                 {character.age}
               </span>
-              <span className="badge bg-black/30 text-foreground/80">
-                {character.gender === "male" ? "Man" : "Woman"}
-              </span>
-              {character.isFeatured && (
-                <span className="badge bg-accent/35 text-accent-soft">Star</span>
-              )}
             </div>
             <p className="mt-1 text-sm font-medium text-foreground/95">
               {character.tagline}
             </p>
           </div>
-          <div
-            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-black/25 text-2xl font-semibold"
-            aria-hidden
-          >
-            {character.name[0]}
+          <div className="mt-1 flex flex-wrap gap-2 sm:mt-0 sm:hidden">
+            <span className="badge bg-black/30 text-foreground/80">{character.age}</span>
           </div>
-        </div>
 
-        <p className="prose-muted mt-3 max-w-2xl text-sm leading-relaxed">
-          {character.summary}
-        </p>
-        <p className="mt-2 max-w-2xl text-sm text-foreground/85">{character.bio}</p>
+          <p className="prose-muted mt-3 text-sm leading-relaxed">
+            {character.summary}
+          </p>
+          <p className="mt-2 line-clamp-3 text-sm text-foreground/85">
+            {character.bio}
+          </p>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {character.tags.map((t) => (
-            <span key={t} className="badge bg-black/30 text-foreground/85">
-              {t}
-            </span>
-          ))}
-        </div>
-
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted">Vibe</p>
-            <p className="mt-1 text-sm">{character.style}</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {character.tags.slice(0, 5).map((t) => (
+              <span key={t} className="badge bg-black/30 text-foreground/85">
+                {t}
+              </span>
+            ))}
           </div>
-          <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted">Voice</p>
-            <p className="mt-1 text-sm line-clamp-2">{character.voice}</p>
-          </div>
-        </div>
 
-        {character.scenarioHooks.length > 0 && (
-          <div className="mt-4">
-            <p className="text-[11px] uppercase tracking-wide text-muted">
-              Scene ideas
-            </p>
-            <ul className="mt-2 flex flex-wrap gap-2">
-              {character.scenarioHooks.slice(0, 3).map((hook) => (
-                <li
-                  key={hook}
-                  className="rounded-full border border-white/10 bg-black/15 px-3 py-1 text-xs text-foreground/85"
-                >
-                  {hook}
-                </li>
-              ))}
-            </ul>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-muted">Vibe</p>
+              <p className="mt-1 text-sm">{character.style}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-muted">
+                Looks
+              </p>
+              <p className="mt-1 line-clamp-2 text-sm">{character.appearance}</p>
+            </div>
           </div>
-        )}
 
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Link href={`/app/chat/${character.id}`} className="btn-primary !py-2.5 text-sm">
-            Chat with {character.name}
-          </Link>
-          <Link
-            href={`/app/companions/${character.id}`}
-            className="btn-secondary !py-2.5 text-sm"
-          >
-            Full profile
-          </Link>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Link
+              href={`/app/chat/${character.id}`}
+              className="btn-primary !py-2.5 text-sm"
+            >
+              Chat with {character.name}
+            </Link>
+            <Link
+              href={`/app/companions/${character.id}`}
+              className="btn-secondary !py-2.5 text-sm"
+            >
+              Full profile
+            </Link>
+          </div>
         </div>
       </div>
     </article>
