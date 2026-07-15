@@ -6,14 +6,16 @@ import {
   type MediaKind,
 } from "@/lib/media";
 import { blobDelete, blobEnabled, blobListCompanion } from "@/lib/media-blob";
+import { canListKind, identityFromRequest } from "@/lib/vault-auth";
+import { mediaTierRequired, tierLabels } from "@/lib/vault";
 
 export const runtime = "nodejs";
 
 const KINDS = new Set(["library", "generated", "videos"]);
 
 /**
- * GET  — serve local disk file (Blob files use direct CDN urls from list)
- * DELETE — remove from Blob and/or disk
+ * GET  — serve local disk file only if membership allows
+ * DELETE — owner/VIP
  */
 export async function GET(req: NextRequest) {
   try {
@@ -29,7 +31,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Invalid kind" }, { status: 400 });
     }
 
-    // If file lives on Blob, redirect to permanent CDN URL
+    const id = identityFromRequest(req);
+    if (!canListKind(id, kind)) {
+      return NextResponse.json(
+        {
+          error: "Membership required",
+          required: mediaTierRequired(kind),
+          requiredLabel: tierLabels[mediaTierRequired(kind)],
+          yourTier: id.tier,
+        },
+        { status: 403 },
+      );
+    }
+
+    // Blob CDN is public if URL was leaked — prefer not redirecting free users
+    // (they never receive URLs from list). Paying users may use CDN URLs directly.
     if (blobEnabled()) {
       try {
         const cloud = await blobListCompanion(companion, kind);
@@ -65,12 +81,10 @@ export async function GET(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const email = req.headers.get("x-user-email") || "";
-    const tier = (req.headers.get("x-user-tier") || "").toLowerCase();
-    const { isOwnerEmail } = await import("@/lib/access");
+    const id = identityFromRequest(req);
     const open = process.env.MEDIA_OPEN_UPLOAD === "1";
     const allowed =
-      open || isOwnerEmail(email) || (tier === "vip" && !!email);
+      open || id.isOwner || (id.tier === "vip" && !!id.email);
     if (!allowed) {
       return NextResponse.json({ error: "Owner/VIP only" }, { status: 403 });
     }

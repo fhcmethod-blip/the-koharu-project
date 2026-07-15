@@ -62,8 +62,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const persistUser = useCallback((next: User | null) => {
     const final = next ? withOwnerAccess(next) : null;
     setUser(final);
-    if (final) localStorage.setItem(USER_KEY, JSON.stringify(final));
-    else localStorage.removeItem(USER_KEY);
+    if (final) {
+      localStorage.setItem(USER_KEY, JSON.stringify(final));
+      // Cookies so media API can gate <img>/<video> without custom headers
+      const maxAge = 60 * 60 * 24 * 365;
+      document.cookie = `kohar_tier=${final.tier}; path=/; max-age=${maxAge}; SameSite=Lax`;
+      document.cookie = `kohar_email=${encodeURIComponent(final.email)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+    } else {
+      localStorage.removeItem(USER_KEY);
+      document.cookie = "kohar_tier=; path=/; max-age=0";
+      document.cookie = "kohar_email=; path=/; max-age=0";
+    }
   }, []);
 
   const verifyAge = useCallback(() => {
