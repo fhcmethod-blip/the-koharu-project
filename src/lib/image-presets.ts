@@ -459,8 +459,8 @@ export function buildCompanionImagePrompt(opts: {
 }
 
 /** Exported for tests / fallbacks */
-export function defaultExplicitScene(seed = "show"): string {
-  return pickScene(EXPLICIT_SCENES, seed);
+export function defaultExplicitScene(seed = "show", male = false): string {
+  return pickScene(male ? EXPLICIT_SCENES_M : EXPLICIT_SCENES_F, seed);
 }
 
 export function defaultNudePoseScene(seed = "nude"): string {
