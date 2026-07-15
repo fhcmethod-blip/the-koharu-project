@@ -23,14 +23,14 @@ export type CompanionVisual = {
 export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
   koharu: {
     gender: "female",
-    preferredMode: "lust",
+    preferredMode: "pony",
     look: [
-      "1girl, solo, adult woman 22, east asian",
-      "long straight black hair, soft bangs, warm brown eyes, oval face",
-      "soft pretty girlfriend face, light natural makeup",
-      "petite curvy body, soft breasts, narrow waist, fair warm skin",
-      "cute-sexy vibe, soft pink and black clothes when clothed",
-      "approachable beauty, NOT blonde, NOT pale gothic, NOT freckled blonde",
+      "1girl, solo, adult woman 22, anime style",
+      "long silky pastel pink hair, soft bangs, purple violet eyes",
+      "soft pretty girlfriend face, blush, gentle smile",
+      "slim curvy body, soft breasts, fair smooth skin, narrow waist",
+      "black ruffled crop top, black lace choker with pink gem, crystal earrings, fishnet sleeves when clothed",
+      "cute-sexy pink-haired beauty, NOT black hair, NOT blonde, NOT brown eyes",
     ].join(", "),
   },
   mira: {
