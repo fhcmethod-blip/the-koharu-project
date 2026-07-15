@@ -35,7 +35,7 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
   },
   mira: {
     gender: "female",
-    preferredMode: "realistic",
+    preferredMode: "pony",
     look: [
       "1girl, solo, adult woman 28, elegant european-mixed features",
       "sleek dark brown shoulder-length hair, often half-up, hazel-green eyes",
@@ -47,19 +47,19 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
   },
   nova: {
     gender: "female",
-    preferredMode: "lust",
+    preferredMode: "pony",
     look: [
-      "1girl, solo, adult woman 24",
+      "1girl, solo, adult woman 24, anime style, youthful early twenties",
       "messy wavy honey-blonde hair dark roots, bright blue-green eyes, freckles",
-      "wide playful grin, expressive bratty face",
-      "athletic fit body, toned abs vibe, strong thighs, smaller athletic breasts, sun-kissed skin",
+      "wide playful grin, expressive bratty youthful face, soft skin no wrinkles",
+      "athletic fit body, toned, smaller athletic breasts, sun-kissed skin",
       "crop top streetwear gym-hot energy, gold jewelry",
-      "chaotic hot, NOT black hair, NOT pale goth, NOT soft romantic redhead",
+      "young adult 24, NOT middle-aged, NOT 40, NOT mature woman face, NOT black hair, NOT goth",
     ].join(", "),
   },
   elena: {
     gender: "female",
-    preferredMode: "realistic",
+    preferredMode: "pony",
     look: [
       "1girl, solo, adult woman 26",
       "long wavy auburn chestnut hair, soft green-grey eyes, full lips, light freckles",
@@ -71,7 +71,7 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
   },
   raven: {
     gender: "female",
-    preferredMode: "realistic",
+    preferredMode: "pony",
     look: [
       "1girl, solo, adult woman 27",
       "straight jet-black hair sleek, pale cool skin, icy grey eyes, dark eyeliner",
@@ -96,9 +96,9 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
   // Male companions
   kai: {
     gender: "male",
-    preferredMode: "lust",
+    preferredMode: "pony",
     look: [
-      "1boy, solo, adult man 24, east asian male",
+      "1boy, solo, adult man 24, east asian male, anime style",
       "messy black hair long on top, warm brown eyes, soft jaw light stubble",
       "handsome boyfriend face, friendly hot",
       "lean athletic body, toned arms, light fair-warm skin, male body",
@@ -108,9 +108,9 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
   },
   cassian: {
     gender: "male",
-    preferredMode: "realistic",
+    preferredMode: "pony",
     look: [
-      "1boy, solo, adult man 31",
+      "1boy, solo, adult man 31, anime style, handsome early thirties",
       "short dark hair silver temples, steel-blue eyes, sharp jaw stubble",
       "poised dominant male face, expensive calm",
       "tall broad shoulders, lean muscular, defined chest, olive-fair skin",
@@ -120,9 +120,9 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
   },
   jax: {
     gender: "male",
-    preferredMode: "lust",
+    preferredMode: "pony",
     look: [
-      "1boy, solo, adult man 25",
+      "1boy, solo, adult man 25, anime style, youthful early twenties",
       "tousled dirty-blonde hair, green eyes, cocky smirk, light freckles",
       "athletic muscular male, strong arms chest, sun-kissed skin",
       "tank top ripped jeans sneakers vibe",
@@ -131,9 +131,9 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
   },
   theo: {
     gender: "male",
-    preferredMode: "realistic",
+    preferredMode: "pony",
     look: [
-      "1boy, solo, adult man 27",
+      "1boy, solo, adult man 27, anime style",
       "soft wavy brown hair, hazel eyes, optional glasses, gentle face",
       "slim lean build, long fingers, warm ivory skin, light chest hair",
       "flannel linen shirt romantic male",
@@ -142,9 +142,9 @@ export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
   },
   damon: {
     gender: "male",
-    preferredMode: "realistic",
+    preferredMode: "pony",
     look: [
-      "1boy, solo, adult man 29",
+      "1boy, solo, adult man 29, anime style",
       "black hair slicked back, pale cool skin, ice-grey eyes, sharp features",
       "tall lean muscular V-torso, light dark chest hair",
       "black shirt leather jacket silver rings",
