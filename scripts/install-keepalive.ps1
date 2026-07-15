@@ -1,7 +1,7 @@
-# Install / repair scheduled tasks so the site restarts if it dies.
-# - At logon
-# - Every 5 minutes while logged on (watchdog)
-# Run once as the logged-in user (no admin required for current-user tasks).
+# Install / repair scheduled tasks so the site + Fooocus + bridge start and recover.
+# - At logon (staggered)
+# - Every 5 minutes (watchdog)
+# Run once as the logged-in user.
 
 $ErrorActionPreference = "Stop"
 $ProjectDir = "C:\Users\Rob_k\OneDrive\Desktop\kohar"
@@ -24,7 +24,6 @@ function Register-KoharuTask {
     $action = New-ScheduledTaskAction -Execute $Execute -Argument $Arguments -WorkingDirectory $WorkDir
   }
 
-  # Logon + recurring every 5 minutes (watchdog)
   $tLogon = New-ScheduledTaskTrigger -AtLogOn -User $UserId
   $tLogon.Delay = "PT${LogonDelaySec}S"
 
@@ -41,35 +40,49 @@ function Register-KoharuTask {
     -ExecutionTimeLimit (New-TimeSpan -Hours 0) `
     -MultipleInstances IgnoreNew
 
-  # Keep running in background after start scripts exit
   $principal = New-ScheduledTaskPrincipal -UserId $UserId -LogonType Interactive -RunLevel Limited
 
   Register-ScheduledTask -TaskName $Name -Action $action -Trigger @($tLogon, $tRepeat) `
     -Settings $settings -Principal $principal -Force | Out-Null
 
-  Write-Host "Registered task: $Name"
+  Write-Host "Registered task: $Name (logon +${LogonDelaySec}s, every 5 min)"
 }
 
-# Website (Next.js on :8000)
+# 1) Fooocus GPU UI (:7865) — first so bridge can connect
+$fooBat = Join-Path $ProjectDir "scripts\start-fooocus.bat"
+Register-KoharuTask -Name "KoharuFooocus" `
+  -Execute $fooBat `
+  -WorkDir (Join-Path $ProjectDir "scripts") `
+  -LogonDelaySec 15
+
+# 2) Website (Next.js on :8000) — optional local fallback
 Register-KoharuTask -Name "KoharuWebApp" `
   -Execute "wscript.exe" `
   -Arguments "`"$ProjectDir\start-site-hidden.vbs`"" `
   -WorkDir $ProjectDir `
-  -LogonDelaySec 30
+  -LogonDelaySec 40
 
-# Fooocus bridge (:8888)
+# 3) Fooocus bridge (:8888) — after Fooocus has time to boot
 $bridgeBat = Join-Path $ProjectDir "scripts\start-fooocus-bridge.bat"
-if (Test-Path $bridgeBat) {
-  Register-KoharuTask -Name "KoharuFooocusBridge" `
-    -Execute $bridgeBat `
-    -Arguments "" `
-    -WorkDir (Join-Path $ProjectDir "scripts") `
-    -LogonDelaySec 45
-}
+Register-KoharuTask -Name "KoharuFooocusBridge" `
+  -Execute $bridgeBat `
+  -WorkDir (Join-Path $ProjectDir "scripts") `
+  -LogonDelaySec 90
+
+# 4) Media CDN (:8890) — multi-device vault files via tunnel
+$mediaBat = Join-Path $ProjectDir "scripts\start-media-cdn.bat"
+Register-KoharuTask -Name "KoharuMediaCDN" `
+  -Execute $mediaBat `
+  -WorkDir (Join-Path $ProjectDir "scripts") `
+  -LogonDelaySec 20
 
 Write-Host ""
-Write-Host "Done. Starting KoharuWebApp now..."
-Start-ScheduledTask -TaskName "KoharuWebApp" -ErrorAction SilentlyContinue
+Write-Host "Starting services..."
+Start-ScheduledTask -TaskName "KoharuFooocus" -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
+Start-ScheduledTask -TaskName "KoharuMediaCDN" -ErrorAction SilentlyContinue
+Start-ScheduledTask -TaskName "KoharuWebApp" -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName "KoharuFooocusBridge" -ErrorAction SilentlyContinue
-Write-Host "Tasks kicked. Check logs\startup.log"
+Write-Host "Done. Tasks: KoharuFooocus, KoharuMediaCDN, KoharuWebApp, KoharuFooocusBridge"
+Get-ScheduledTask -TaskName "KoharuFooocus","KoharuMediaCDN","KoharuWebApp","KoharuFooocusBridge" |
+  Format-Table TaskName, State -AutoSize

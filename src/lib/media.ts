@@ -104,6 +104,11 @@ export function ensureMediaDirs(companionId: string) {
   }
 }
 
+/** Public multi-device base, e.g. https://media.thekoharuproject.com */
+export function mediaPublicBase(): string {
+  return (process.env.MEDIA_PUBLIC_BASE || "").replace(/\/$/, "");
+}
+
 function toMediaFile(
   companionId: string,
   kind: MediaKind,
@@ -111,15 +116,20 @@ function toMediaFile(
   stat: fs.Stats,
 ): MediaFile {
   const safeId = sanitizeId(companionId);
+  const base = mediaPublicBase();
+  const url = base
+    ? `${base}/${safeId}/${kind}/${encodeURIComponent(name).replace(/%2F/g, "/")}`
+    : `/api/media/file?companion=${encodeURIComponent(safeId)}&kind=${kind}&name=${encodeURIComponent(name)}`;
   return {
     id: `${kind}:${name}`,
     companionId: safeId,
     kind,
     mediaType: mediaTypeOf(name),
     name,
-    url: `/api/media/file?companion=${encodeURIComponent(safeId)}&kind=${kind}&name=${encodeURIComponent(name)}`,
+    url,
     size: stat.size,
     mtime: stat.mtimeMs,
+    storage: base ? "cdn" : "disk",
   };
 }
 

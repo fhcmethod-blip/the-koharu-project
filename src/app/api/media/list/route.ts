@@ -2,31 +2,34 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   ensureMediaDirs,
   listCompanionMedia,
+  mediaPublicBase,
   mediaRoot,
   type MediaFile,
   type MediaKind,
 } from "@/lib/media";
 import { blobEnabled, blobListCompanion } from "@/lib/media-blob";
+import { cdnEnabled, cdnListCompanion } from "@/lib/media-cdn";
 import { canListKind, identityFromRequest } from "@/lib/vault-auth";
 import { mediaTierRequired, tierLabels } from "@/lib/vault";
 
 export const runtime = "nodejs";
 
-function mergeByName(a: MediaFile[], b: MediaFile[]): MediaFile[] {
+function mergeByName(...lists: MediaFile[][]): MediaFile[] {
   const map = new Map<string, MediaFile>();
-  for (const item of b) map.set(`${item.kind}:${item.name}`, item);
-  for (const item of a) map.set(`${item.kind}:${item.name}`, item);
+  // Later lists win (priority order: pass cloud/cdn last)
+  for (const list of lists) {
+    for (const item of list) {
+      map.set(`${item.kind}:${item.name}`, item);
+    }
+  }
   return Array.from(map.values()).sort((x, y) => y.mtime - x.mtime);
 }
 
-/** Strip playable URLs for clients that must not access this kind. */
 function redact(items: MediaFile[], allowed: boolean): MediaFile[] {
   if (allowed) return items;
-  // Locked: no urls, no real filenames — only a count placeholder
   return [];
 }
 
-/** GET /api/media/list?companion=koharu&kind=library|videos|generated|all */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const companion = searchParams.get("companion") || "koharu";
@@ -34,17 +37,17 @@ export async function GET(req: NextRequest) {
   const id = identityFromRequest(req);
 
   const hasBlob = blobEnabled();
-  if (!hasBlob) {
+  const hasCdn = cdnEnabled();
+  if (!hasBlob && !hasCdn) {
     try {
       ensureMediaDirs(companion);
     } catch {
-      /* vercel without blob */
+      /* */
     }
   }
 
   async function loadKind(kind: MediaKind): Promise<MediaFile[]> {
-    const allowed = canListKind(id, kind);
-    if (!allowed) return [];
+    if (!canListKind(id, kind)) return [];
 
     const disk = (() => {
       try {
@@ -54,18 +57,12 @@ export async function GET(req: NextRequest) {
       }
     })();
     const cloud = hasBlob ? await blobListCompanion(companion, kind) : [];
-    return mergeByName(cloud, disk);
+    const cdn = hasCdn ? await cdnListCompanion(companion, kind) : [];
+    // CDN/cloud preferred for multi-device URLs
+    return mergeByName(disk, cloud, cdn);
   }
 
-  async function lockedMeta(kind: MediaKind) {
-    // Count without exposing URLs: load only if owner/bypass — otherwise generic
-    // Free users must not learn real filenames/urls
-    return {
-      locked: !canListKind(id, kind),
-      requiredTier: tierLabels[mediaTierRequired(kind)],
-      count: canListKind(id, kind) ? undefined : null,
-    };
-  }
+  const storage = hasBlob ? "blob" : hasCdn ? "cdn" : "disk";
 
   if (kindParam === "all") {
     const allowLib = canListKind(id, "library");
@@ -87,17 +84,31 @@ export async function GET(req: NextRequest) {
         generated: allowGen,
       },
       locks: {
-        library: await lockedMeta("library"),
-        videos: await lockedMeta("videos"),
-        generated: await lockedMeta("generated"),
+        library: {
+          locked: !allowLib,
+          requiredTier: tierLabels[mediaTierRequired("library")],
+        },
+        videos: {
+          locked: !allowVid,
+          requiredTier: tierLabels[mediaTierRequired("videos")],
+        },
+        generated: {
+          locked: !allowGen,
+          requiredTier: tierLabels[mediaTierRequired("generated")],
+        },
       },
-      storage: hasBlob ? "blob" : "disk",
-      permanent: hasBlob,
+      storage,
+      permanent: hasBlob || hasCdn,
+      mediaPublicBase: mediaPublicBase() || null,
       count: library.length + videos.length + generated.length,
       images: library.length,
       videos: videos.length,
       generated: generated.length,
-      mediaRoot: hasBlob ? "vercel-blob:vault/" : mediaRoot(),
+      mediaRoot: hasCdn
+        ? mediaPublicBase()
+        : hasBlob
+          ? "vercel-blob:vault/"
+          : mediaRoot(),
       items: { library, videos, generated },
       flat: [...library, ...videos, ...generated].sort(
         (a, b) => b.mtime - a.mtime,
@@ -115,11 +126,11 @@ export async function GET(req: NextRequest) {
     access: allowed,
     locked: !allowed,
     requiredTier: tierLabels[mediaTierRequired(kind)],
-    storage: hasBlob ? "blob" : "disk",
-    permanent: hasBlob,
+    storage,
+    permanent: hasBlob || hasCdn,
+    mediaPublicBase: mediaPublicBase() || null,
     count: items.length,
-    mediaRoot: hasBlob ? "vercel-blob:vault/" : mediaRoot(),
-    images: items.filter((i) => i.mediaType === "image"),
     items,
+    images: items.filter((i) => i.mediaType === "image"),
   });
 }

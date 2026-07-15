@@ -139,9 +139,49 @@ export default function MediaManagerPage() {
     return h;
   }, [user]);
 
-  async function uploadToCloud(file: File, kind: "library" | "videos" | "generated") {
+  /** Prefer Media CDN (multi-device), then Vercel Blob. Never browser-only. */
+  async function uploadToCloud(
+    file: File,
+    kind: "library" | "videos" | "generated",
+  ): Promise<{ name: string; url: string }> {
+    const cdnBase = (
+      process.env.NEXT_PUBLIC_MEDIA_PUBLIC_BASE || ""
+    ).replace(/\/$/, "");
+    const secret =
+      process.env.NEXT_PUBLIC_MEDIA_CDN_SECRET ||
+      process.env.NEXT_PUBLIC_FOOOCUS_BRIDGE_SECRET ||
+      "";
+
+    // 1) Media CDN (your tunnel — works for multi-GB, shared by phones)
+    if (cdnBase) {
+      setUploadProgress(`Uploading to media cloud: ${file.name}…`);
+      const form = new FormData();
+      form.set("companion", companion);
+      form.set("kind", kind);
+      form.set("file", file, file.name);
+      const res = await fetch(`${cdnBase}/v1/upload`, {
+        method: "POST",
+        headers: secret ? { "x-media-secret": secret } : {},
+        body: form,
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        saved?: { name: string; url?: string; path?: string; kind?: string }[];
+      };
+      if (!res.ok || !data.saved?.[0]) {
+        throw new Error(data.error || `Media CDN HTTP ${res.status}`);
+      }
+      const s = data.saved[0];
+      const path = s.path || `${companion}/${s.kind || kind}/${s.name}`;
+      const url = s.url?.startsWith("http")
+        ? s.url
+        : `${cdnBase}/${path.replace(/^\//, "")}`;
+      return { name: s.name, url };
+    }
+
+    // 2) Vercel Blob (when store is available)
     const { pathname } = vaultBlobPathname(companion, kind, file.name);
-    // Always direct-to-cloud for anything that matters (esp. videos)
+    setUploadProgress(`Uploading to Vercel Blob: ${file.name}…`);
     const result = await upload(pathname, file, {
       access: "public",
       handleUploadUrl: "/api/media/client-upload",
@@ -151,7 +191,6 @@ export default function MediaManagerPage() {
         companion,
         kind,
       }),
-      // Multipart for multi‑GB; also fine for medium files
       multipart: file.size > 8 * 1024 * 1024,
       contentType: file.type || "application/octet-stream",
       onUploadProgress: ({ percentage }) => {
@@ -160,7 +199,7 @@ export default function MediaManagerPage() {
         );
       },
     });
-    return result;
+    return { name: file.name, url: result.url };
   }
 
   async function uploadFiles(fileList: FileList | File[]) {
@@ -196,19 +235,13 @@ export default function MediaManagerPage() {
           continue;
         }
 
-        const isVideo =
-          file.type.startsWith("video/") ||
-          /\.(mp4|webm|mov|m4v|mkv)$/i.test(file.name);
-
         try {
-          // Videos + anything over 4MB → direct cloud (playable on phone + PC)
-          if (isVideo || file.size > SERVER_UPLOAD_MAX) {
-            const blob = await uploadToCloud(file, kind);
-            ok.push({ name: file.name, url: blob.url });
+          // Everything goes to shared cloud/CDN — never "this device only"
+          if (file.size > SERVER_UPLOAD_MAX) {
+            ok.push(await uploadToCloud(file, kind));
             continue;
           }
 
-          // Tiny images: server upload (also stores in Blob when configured)
           const form = new FormData();
           form.set("companion", companion);
           form.set("kind", kind);
@@ -219,35 +252,23 @@ export default function MediaManagerPage() {
             body: form,
           });
           const data = await res.json();
-          if (!res.ok || !data.count) {
-            // Fall through to client cloud upload
-            const blob = await uploadToCloud(file, kind);
-            ok.push({ name: file.name, url: blob.url });
+          if (res.ok && data.count && data.saved?.[0]?.url) {
+            ok.push({ name: file.name, url: data.saved[0].url });
             continue;
           }
-          const url = data.saved?.[0]?.url || "";
-          ok.push({ name: file.name, url });
+          // Server disk empty on Vercel — fall through to CDN/Blob
+          ok.push(await uploadToCloud(file, kind));
         } catch (e) {
           const msg = e instanceof Error ? e.message : "failed";
-          // NEVER store videos in browser-only storage — that only works on this device
-          if (!isVideo && file.size <= SERVER_UPLOAD_MAX) {
-            try {
-              await localVaultSave(companion, kind, file);
-              errs.push(
-                `${file.name}: cloud failed (${msg}) — saved on THIS device only`,
-              );
-              continue;
-            } catch {
-              /* */
-            }
-          }
-          errs.push(`${file.name}: ${msg}`);
+          errs.push(
+            `${file.name}: ${msg}. Is media CDN running (media.thekoharuproject.com)?`,
+          );
         }
       }
 
       if (ok.length) {
         setMessage(
-          `✓ ${ok.length} file${ok.length === 1 ? "" : "s"} saved in the CLOUD — playable on phones & computers. Open IRL Vault to watch.`,
+          `✓ ${ok.length} file${ok.length === 1 ? "" : "s"} on shared media cloud — open IRL Vault (VIP) on any device.`,
         );
       }
       if (errs.length) setError(errs.join("; "));

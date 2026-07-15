@@ -3,18 +3,19 @@ import { isOwnerEmail } from "@/lib/access";
 import {
   ensureMediaDirs,
   isAllowedMedia,
+  mediaPublicBase,
   saveUploadedFile,
   type MediaKind,
 } from "@/lib/media";
 import { blobEnabled, blobUpload } from "@/lib/media-blob";
+import { cdnEnabled } from "@/lib/media-cdn";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 /**
- * POST /api/media/upload
- * multipart form-data: companion, kind, files
- * Prefer Vercel Blob (permanent CDN) when BLOB_READ_WRITE_TOKEN is set.
+ * Small-file upload via Vercel.
+ * Large files should use client-upload (Blob) or MEDIA CDN /v1/upload.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -30,10 +31,7 @@ export async function POST(req: NextRequest) {
 
     if (!allowed) {
       return NextResponse.json(
-        {
-          error:
-            "Upload restricted. Log in as owner/VIP (Account → full access).",
-        },
+        { error: "Upload restricted. Log in as owner/VIP." },
         { status: 403 },
       );
     }
@@ -41,19 +39,20 @@ export async function POST(req: NextRequest) {
     const form = await req.formData();
     const companion = String(form.get("companion") || "koharu");
     let kind = String(form.get("kind") || "library") as MediaKind;
-    if (!["library", "videos", "generated"].includes(kind)) {
-      kind = "library";
-    }
+    if (!["library", "videos", "generated"].includes(kind)) kind = "library";
 
     const useBlob = blobEnabled();
     if (!useBlob) {
-      ensureMediaDirs(companion);
+      try {
+        ensureMediaDirs(companion);
+      } catch {
+        /* */
+      }
     }
 
     const files = form.getAll("files").filter((f) => f instanceof File) as File[];
     const single = form.get("file");
     if (single instanceof File) files.push(single);
-
     if (!files.length) {
       return NextResponse.json({ error: "No files" }, { status: 400 });
     }
@@ -66,34 +65,32 @@ export async function POST(req: NextRequest) {
         if (!file.name || !isAllowedMedia(file.name)) {
           failed.push({
             name: file.name || "unknown",
-            error: "Unsupported type (use jpg/png/webp/gif/mp4/webm/mov)",
+            error: "Unsupported type",
           });
           continue;
         }
-        // Server route only for smaller files. Large videos use
-        // /api/media/client-upload (direct browser → Blob, up to 5GB).
         if (file.size > 4.5 * 1024 * 1024) {
           failed.push({
             name: file.name,
             error:
-              "Use Media Manager large-file upload (files over ~4MB go direct to cloud, up to 5GB)",
+              "File too large for this route — use Media Manager (direct cloud/CDN upload)",
           });
           continue;
         }
 
+        const buf = Buffer.from(await file.arrayBuffer());
         if (useBlob) {
-          const buf = Buffer.from(await file.arrayBuffer());
-          const item = await blobUpload(
-            companion,
-            kind,
-            file.name,
-            buf,
-            file.type || undefined,
+          saved.push(
+            await blobUpload(companion, kind, file.name, buf, file.type || undefined),
           );
-          saved.push(item);
         } else {
-          const buf = Buffer.from(await file.arrayBuffer());
           const item = saveUploadedFile(companion, kind, file.name, buf);
+          // Rewrite URL to public CDN if configured
+          const base = mediaPublicBase();
+          if (base) {
+            item.url = `${base}/${item.companionId}/${item.kind}/${item.name}`;
+            item.storage = "cdn";
+          }
           saved.push(item);
         }
       } catch (e) {
@@ -106,8 +103,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      storage: useBlob ? "blob" : "disk",
-      permanent: useBlob,
+      storage: useBlob ? "blob" : cdnEnabled() ? "cdn" : "disk",
+      permanent: useBlob || cdnEnabled(),
       saved,
       failed,
       count: saved.length,
