@@ -32,7 +32,7 @@ export type MediaFile = {
   url: string;
   size: number;
   mtime: number;
-  storage?: "disk" | "blob" | "local";
+  storage?: "disk" | "blob" | "local" | "cdn";
 };
 
 export function mediaRoot(): string {

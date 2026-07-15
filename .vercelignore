@@ -1,0 +1,5 @@
+﻿scripts/_web_*.mp4
+scripts/*.mp4
+media/**
+node_modules
+.next
