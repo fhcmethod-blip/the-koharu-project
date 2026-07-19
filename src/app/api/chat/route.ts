@@ -215,10 +215,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           content: result.content,
           imageUrl,
-          imageSource,
-          imageError: imageUrl ? undefined : imageError,
+          imageSource: imageUrl ? "generated" : undefined,
+          imageError: imageUrl
+            ? undefined
+            : imageRequested
+              ? "unavailable"
+              : undefined,
           source: "openrouter" satisfies Provider,
-          model,
         });
       }
       if (result.error) errors.push(`openrouter: ${result.error}`);
@@ -237,8 +240,12 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           content: result.content,
           imageUrl,
-          imageSource,
-          imageError: imageUrl ? undefined : imageError,
+          imageSource: imageUrl ? "generated" : undefined,
+          imageError: imageUrl
+            ? undefined
+            : imageRequested
+              ? "unavailable"
+              : undefined,
           source: "xai" satisfies Provider,
         });
       }
@@ -257,36 +264,40 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           content: result.content,
           imageUrl,
-          imageSource,
-          imageError: imageUrl ? undefined : imageError,
+          imageSource: imageUrl ? "generated" : undefined,
+          imageError: imageUrl
+            ? undefined
+            : imageRequested
+              ? "unavailable"
+              : undefined,
           source: "local" satisfies Provider,
         });
       }
       if (result.error) errors.push(`local: ${result.error}`);
     }
 
-    // 4) Mock fallback
+    // 4) Mock fallback — never surface provider/env details to clients
+    if (errors.length) {
+      console.warn("Chat providers failed:", errors.join(" | "));
+    }
     const mock = await mockGenerateReply(char, history, text);
     return NextResponse.json({
       content: mock.content,
       imageUrl: imageUrl || mock.imageUrl,
-      imageSource: imageUrl
-        ? imageSource
-        : mock.imageUrl
-          ? "mock"
-          : undefined,
-      imageError: imageUrl || mock.imageUrl ? undefined : imageError,
+      imageSource: imageUrl || mock.imageUrl ? "generated" : undefined,
+      imageError:
+        imageUrl || mock.imageUrl
+          ? undefined
+          : imageRequested
+            ? "unavailable"
+            : undefined,
       source: "mock" satisfies Provider,
-      note:
-        errors.length > 0
-          ? `Live AI failed (${errors.join(" | ")}). Using demo fallback.`
-          : "Using demo AI. Set OPENROUTER_API_KEY in .env.local for live chat.",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("Chat API error:", message);
     return NextResponse.json(
-      { error: "Failed to generate reply", details: message },
+      { error: "Something went wrong. Please try again." },
       { status: 500 },
     );
   }

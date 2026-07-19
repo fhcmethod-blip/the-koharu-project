@@ -19,15 +19,23 @@ export async function GET(
       return NextResponse.json({ error: "Missing id" }, { status: 400 });
     }
 
-    const base = (process.env.FOOOCUS_API_URL || "http://127.0.0.1:8888").replace(
-      /\/$/,
-      "",
-    );
-    const secret = process.env.FOOOCUS_BRIDGE_SECRET || "";
+    const base = (
+      process.env.NEXT_PUBLIC_FOOOCUS_API_URL ||
+      process.env.FOOOCUS_API_URL ||
+      "http://127.0.0.1:8888"
+    ).replace(/\/$/, "");
+    const secret =
+      process.env.FOOOCUS_BRIDGE_SECRET ||
+      process.env.NEXT_PUBLIC_FOOOCUS_BRIDGE_SECRET ||
+      "";
     const headers: Record<string, string> = {};
     if (secret) headers["x-bridge-secret"] = secret;
 
-    const res = await fetch(`${base}/v1/jobs/${encodeURIComponent(id)}`, {
+    const pollUrl = secret
+      ? `${base}/v1/jobs/${encodeURIComponent(id)}?secret=${encodeURIComponent(secret)}`
+      : `${base}/v1/jobs/${encodeURIComponent(id)}`;
+
+    const res = await fetch(pollUrl, {
       headers,
       signal: AbortSignal.timeout(20_000),
       cache: "no-store",
@@ -37,6 +45,7 @@ export async function GET(
       error?: string;
       detail?: string;
       image_url?: string;
+      media_url?: string;
       token?: string;
       base64?: string;
     };
@@ -49,9 +58,12 @@ export async function GET(
     }
 
     if (data.status === "done") {
-      // Prefer bridge file URL (tiny JSON). Fallback to base64 only if old bridge.
+      // Prefer permanent media-cdn URL (survives job expiry; already on PC).
+      // Then bridge job image URL. Fallback to base64 only if old bridge.
       let imageUrl: string | undefined;
-      if (data.image_url) {
+      if (data.media_url && /^https?:\/\//i.test(data.media_url)) {
+        imageUrl = data.media_url;
+      } else if (data.image_url) {
         imageUrl = data.image_url.startsWith("http")
           ? data.image_url
           : `${base}${data.image_url.startsWith("/") ? "" : "/"}${data.image_url}`;
@@ -66,6 +78,7 @@ export async function GET(
           ok: true,
           status: "done",
           imageUrl,
+          mediaUrl: data.media_url || undefined,
           source: "fooocus",
         });
       }
