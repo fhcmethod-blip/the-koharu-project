@@ -108,16 +108,37 @@ export function ChatWindow({ character }: { character: Character }) {
         } catch (imgErr) {
           const raw =
             imgErr instanceof Error ? imgErr.message : "Photo unavailable";
-          const soft =
-            /unauth|401|secret/i.test(raw)
-              ? "Photo service auth failed — gen stack may need a restart."
-              : /timeout|timed out/i.test(raw)
-                ? "Photo took too long — try again."
-                : /502|unreachable|fetch|network|Failed to fetch/i.test(raw)
-                  ? "Photo service offline — PC gen stack may be down."
-                  : "Photo unavailable right now — try again in a moment.";
-          setImageNote(soft);
           console.warn("image gen failed:", raw);
+          // Fast CDN fallback so a photo still lands in the chat bubble
+          try {
+            const listRes = await fetch(
+              `/api/media/list?companion=${encodeURIComponent(character.id)}&kind=all`,
+              { cache: "no-store" },
+            );
+            const listData = (await listRes.json().catch(() => ({}))) as {
+              generated?: { url?: string; mediaType?: string }[];
+              library?: { url?: string; mediaType?: string }[];
+            };
+            const pool = [
+              ...(listData.generated || []),
+              ...(listData.library || []),
+            ].filter((i) => i.url && i.mediaType !== "video");
+            if (pool.length) {
+              preloadedImageUrl =
+                pool[Math.floor(Math.random() * Math.min(pool.length, 12))].url;
+              setImageNote("Photo ready (library)");
+            } else {
+              setImageNote(
+                /unauth|401|secret/i.test(raw)
+                  ? "Photo service auth failed — gen stack may need a restart."
+                  : /timeout|timed out/i.test(raw)
+                    ? "Photo took too long — try again."
+                    : "Photo gen busy — using vault if available.",
+              );
+            }
+          } catch {
+            setImageNote("Photo gen failed — retry “show” in a moment.");
+          }
           setStatusLine(`${character.name} is typing…`);
         }
       } else if (needImage) {

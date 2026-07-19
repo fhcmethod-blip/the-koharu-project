@@ -173,8 +173,41 @@ export async function POST(req: NextRequest) {
     const imageRequested = wantsImage(text) || !!preloadedImageUrl;
 
     if (imageRequested && !skipImage && !preloadedImageUrl) {
-      // Local / long-running server only: generate inline
+      // Prefer CDN library/generated so Vercel always has a public URL for chat.
+      // Gen is attempted only when CDN has nothing (or client asked to generate).
       const forceGen = wantsGenerated(text);
+
+      const tryCdnPic = async (): Promise<boolean> => {
+        try {
+          const { cdnListCompanion } = await import("@/lib/media-cdn");
+          // Prefer recent generated, then library
+          const genList = await cdnListCompanion(char.id, "generated");
+          const libList = await cdnListCompanion(char.id, "library");
+          const pool = [
+            ...genList.filter((i) => i.mediaType === "image" && i.url),
+            ...libList.filter((i) => i.mediaType === "image" && i.url),
+          ];
+          if (!pool.length) return false;
+          const pick = pool[Math.floor(Math.random() * Math.min(pool.length, 12))];
+          if (!pick?.url) return false;
+          imageUrl = pick.url;
+          imageSource = pick.kind === "generated" ? "cdn-generated" : "cdn-library";
+          imageError = undefined;
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
+      const tryDiskLib = (): boolean => {
+        const lib = pickRandomLibraryImage(char.id);
+        if (!lib?.url) return false;
+        imageUrl = lib.url;
+        imageSource = "library";
+        imageError = undefined;
+        return true;
+      };
+
       const tryGen = async () => {
         const gen = await generateCompanionImage({
           companionId: char.id,
@@ -193,17 +226,20 @@ export async function POST(req: NextRequest) {
         }
       };
 
-      if (forceGen) {
-        await tryGen();
-      }
-      if (!imageUrl) {
-        const lib = pickRandomLibraryImage(char.id);
-        if (lib) {
-          imageUrl = lib.url;
-          imageSource = "library";
-          imageError = undefined;
-        } else if (!forceGen) {
+      // Delivery-first: attach a real photo URL into chat ASAP
+      if (!forceGen) {
+        if (!(await tryCdnPic())) tryDiskLib();
+        if (!imageUrl) await tryGen();
+      } else {
+        // Client gen usually already ran; if we are here it failed — still deliver CDN pic
+        if (!(await tryCdnPic())) {
+          tryDiskLib();
+        }
+        if (!imageUrl) {
           await tryGen();
+          if (!imageUrl) {
+            if (!(await tryCdnPic())) tryDiskLib();
+          }
         }
       }
     }
