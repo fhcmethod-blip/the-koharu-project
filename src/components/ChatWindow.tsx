@@ -80,9 +80,12 @@ export function ChatWindow({ character }: { character: Character }) {
 
     try {
       let preloadedImageUrl: string | undefined;
+      const needImage = wantsImage(content);
+      // Prefer async Fooocus for "show" / generate / pic requests so the
+      // image URL is ready before the chat bubble (delivered in-app).
+      const preferClientGen = needImage && wantsGenerated(content);
 
-      // Async image path: long jobs poll outside the chat request
-      if (wantsImage(content) && wantsGenerated(content)) {
+      if (preferClientGen) {
         setStatusLine(`${character.name} is sending a pic…`);
         try {
           const job = await startImageJob(character.id, content, {
@@ -105,7 +108,6 @@ export function ChatWindow({ character }: { character: Character }) {
         } catch (imgErr) {
           const raw =
             imgErr instanceof Error ? imgErr.message : "Photo unavailable";
-          // Keep product-safe but slightly more helpful
           const soft =
             /unauth|401|secret/i.test(raw)
               ? "Photo service auth failed — gen stack may need a restart."
@@ -118,32 +120,38 @@ export function ChatWindow({ character }: { character: Character }) {
           console.warn("image gen failed:", raw);
           setStatusLine(`${character.name} is typing…`);
         }
+      } else if (needImage) {
+        setStatusLine(`${character.name} is sending a pic…`);
       } else {
         setStatusLine(`${character.name} is typing…`);
       }
 
+      // Only skip server image when we already have a client-preloaded URL.
+      // If client gen failed or user asked for a pic without gen keywords,
+      // let /api/chat attach library/gen so the photo still lands in chat.
       const reply = await generateReply(character, next, content, {
-        skipImage: true,
+        skipImage: Boolean(preloadedImageUrl) || !needImage,
         preloadedImageUrl,
       });
 
+      const deliveredUrl = reply.imageUrl || preloadedImageUrl;
       const assistantMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
         content: reply.content,
-        imageUrl: reply.imageUrl || preloadedImageUrl,
+        imageUrl: deliveredUrl,
         createdAt: new Date().toISOString(),
       };
       const withReply = [...next, assistantMsg];
       setMessages(withReply);
       saveChat(character.id, withReply);
 
-      const finalImg = assistantMsg.imageUrl;
-      if (finalImg) {
+      if (deliveredUrl) {
         setImageNote("Photo ready");
-      } else if (reply.imageError) {
+      } else if (needImage) {
         setImageNote(
-          "Photo unavailable right now — try again in a moment.",
+          reply.imageError ||
+            "Photo unavailable right now — try “show” again in a moment.",
         );
       }
     } catch (e) {
@@ -230,14 +238,21 @@ export function ChatWindow({ character }: { character: Character }) {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={m.imageUrl}
-                  alt="Generated"
+                  alt="Photo"
                   loading="eager"
                   decoding="async"
                   referrerPolicy="no-referrer"
                   className="mt-3 h-auto max-h-[55dvh] w-full rounded-xl bg-black/30 object-contain sm:max-h-[70vh]"
                   onError={(e) => {
                     const el = e.currentTarget;
-                    el.style.display = "none";
+                    el.alt = "Photo failed to load";
+                    el.className =
+                      "mt-3 flex min-h-[8rem] w-full items-center justify-center rounded-xl border border-red-500/30 bg-black/40 p-3 text-center text-xs text-muted";
+                    // Show path hint without wiping the message
+                    el.style.objectFit = "none";
+                    setImageNote(
+                      "Photo link failed to load — try “show” again.",
+                    );
                   }}
                 />
               )}
