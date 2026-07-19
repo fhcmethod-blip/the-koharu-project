@@ -1,0 +1,28 @@
+{
+  "name": "koharu-admin",
+  "version": "1.0.0",
+  "description": "Admin desktop app for The Koharu Project — real chat inbox, vault uploads, Fansly approvals",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable"
+  },
+  "dependencies": {
+    "electron-fetch": "^1.9.1"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.koharuproject.admin",
+    "productName": "Koharu Admin",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "portable",
+      "icon": "icon.ico"
+    }
+  }
+}

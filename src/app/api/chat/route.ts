@@ -4,6 +4,7 @@ import { buildSystemPrompt } from "@/lib/ai-rules";
 import { getCharacter } from "@/lib/characters";
 import { generateReply as mockGenerateReply } from "@/lib/mock-ai";
 import { generateCompanionImage } from "@/lib/image-gen";
+import { getSessionFromRequest } from "@/lib/auth/session";
 import {
   pickRandomLibraryImage,
   wantsGenerated,
@@ -12,7 +13,7 @@ import {
 
 export const runtime = "nodejs";
 
-type Provider = "openrouter" | "xai" | "local" | "mock";
+type Provider = "openrouter" | "xai" | "local" | "mock" | "real-person";
 
 type ChatBody = {
   character: Character;
@@ -129,6 +130,37 @@ export async function POST(req: NextRequest) {
 
     const text = userText.trim();
     const errors: string[] = [];
+
+    // --- Real-person chat: if companion is "rob", route to real-chat store ---
+    if (char.id === "rob") {
+      const session = await getSessionFromRequest(req);
+      if (!session) {
+        return NextResponse.json(
+          { error: "Not logged in." },
+          { status: 401 },
+        );
+      }
+      const tier = session.tier || "free";
+      if (tier === "free") {
+        return NextResponse.json(
+          { error: "Chat with Rob requires Touch or Claimed membership." },
+          { status: 403 },
+        );
+      }
+      const { sendSubscriberMessage } = await import("@/lib/real-chat-store");
+      const msg = await sendSubscriberMessage({
+        subscriberId: session.sub,
+        subscriberName: session.displayName || session.email,
+        content: text,
+      });
+      return NextResponse.json({
+        content: null,
+        realChat: true,
+        messageId: msg.id,
+        note: "Message sent to Rob. He'll reply soon.",
+        source: "real-person" satisfies Provider,
+      });
+    }
 
     // Optional image attach — BEFORE text reply
     // On Vercel, client should poll /api/image/jobs and pass preloadedImageUrl

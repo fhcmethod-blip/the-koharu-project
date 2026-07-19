@@ -19,6 +19,7 @@ import jax from "../../companions/json/jax.json";
 import theo from "../../companions/json/theo.json";
 import damon from "../../companions/json/damon.json";
 import ren from "../../companions/json/ren.json";
+import rob from "../../companions/json/rob.json";
 
 const FILES: CompanionFile[] = [
   koharu as CompanionFile,
@@ -34,6 +35,7 @@ const FILES: CompanionFile[] = [
   theo as CompanionFile,
   damon as CompanionFile,
   ren as CompanionFile,
+  rob as CompanionFile,
 ];
 
 const byId = new Map<string, CompanionFile>(FILES.map((c) => [c.id, c]));

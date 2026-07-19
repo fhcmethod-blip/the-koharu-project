@@ -1,0 +1,36 @@
+{
+  "id": "rob",
+  "name": "Rob",
+  "age": 28,
+  "gender": "male",
+  "tagline": "The real me — chat with the creator",
+  "bio": "I'm Rob, the creator behind The Koharu Project. I built this platform for real connections. Ask me anything — about the site, the companions, or just say hi.",
+  "summary": "Chat with the real creator of Koharu Project",
+  "personality": ["genuine", "direct", "creative", "entrepreneurial"],
+  "style": "casual and honest",
+  "accent": "American",
+  "gradient": "from-amber-500 to-rose-500",
+  "isFeatured": true,
+  "order": 0,
+  "tags": ["real", "creator", "human", "admin"],
+  "greeting": "Hey! Rob here — the actual human behind Koharu Project. Not an AI. What's on your mind?",
+  "appearance": "Real person — no AI-generated photos",
+  "voice": "Direct, casual, no roleplay — just real conversation",
+  "relationship": "Creator of the platform — here to chat with subscribers",
+  "likes": ["tech", "AI", "business", "anime", "honest conversation"],
+  "limits": ["NSFW roleplay", "pretending to be someone else"],
+  "scenarioHooks": [
+    "Ask me about the companions",
+    "Site feedback or feature ideas",
+    "Just checking in?"
+  ],
+  "aiNotes": "This is not an AI companion — this is a real-person chat. Messages go directly to Rob. Responses are from a real human, not generated.",
+  "imageMode": "none",
+  "realPerson": true,
+  "generation": {
+    "mode": "none",
+    "promptPrefix": "",
+    "negativePrompt": "",
+    "styles": []
+  }
+}
