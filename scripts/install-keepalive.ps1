@@ -1,6 +1,7 @@
-# Install / repair scheduled tasks so the site + Fooocus + bridge start and recover.
-# - At logon (staggered)
-# - Every 5 minutes (watchdog)
+# Install / repair Koharu background services
+# - Fooocus + bridge + media + web: start at logon (hidden, no CMD flash)
+# - Silent 5-min recovery: only restarts if something died (port check is invisible)
+# - Does NOT stop Fooocus - site image gen stays available
 # Run once as the logged-in user.
 
 $ErrorActionPreference = "Stop"
@@ -13,7 +14,8 @@ function Register-KoharuTask {
     [string]$Execute,
     [string]$Arguments = $null,
     [string]$WorkDir,
-    [int]$LogonDelaySec = 30
+    [int]$LogonDelaySec = 30,
+    [switch]$RepeatEvery5Min
   )
 
   Unregister-ScheduledTask -TaskName $Name -Confirm:$false -ErrorAction SilentlyContinue
@@ -27,62 +29,99 @@ function Register-KoharuTask {
   $tLogon = New-ScheduledTaskTrigger -AtLogOn -User $UserId
   $tLogon.Delay = "PT${LogonDelaySec}S"
 
-  $tRepeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
-    -RepetitionInterval (New-TimeSpan -Minutes 5) `
-    -RepetitionDuration (New-TimeSpan -Days 3650)
+  $triggers = @($tLogon)
+  $modeNote = "logon +${LogonDelaySec}s only"
+
+  if ($RepeatEvery5Min) {
+    $tRepeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+      -RepetitionInterval (New-TimeSpan -Minutes 5) `
+      -RepetitionDuration (New-TimeSpan -Days 3650)
+    $triggers += $tRepeat
+    $modeNote = "logon +${LogonDelaySec}s, silent every 5 min if down"
+  }
 
   $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -StartWhenAvailable `
-    -RestartCount 3 `
-    -RestartInterval (New-TimeSpan -Minutes 1) `
     -ExecutionTimeLimit (New-TimeSpan -Hours 0) `
     -MultipleInstances IgnoreNew
 
   $principal = New-ScheduledTaskPrincipal -UserId $UserId -LogonType Interactive -RunLevel Limited
 
-  Register-ScheduledTask -TaskName $Name -Action $action -Trigger @($tLogon, $tRepeat) `
+  Register-ScheduledTask -TaskName $Name -Action $action -Trigger $triggers `
     -Settings $settings -Principal $principal -Force | Out-Null
 
-  Write-Host "Registered task: $Name (logon +${LogonDelaySec}s, every 5 min)"
+  Write-Host "Registered task: $Name ($modeNote)"
 }
 
-# 1) Fooocus GPU UI (:7865) — first so bridge can connect
-$fooBat = Join-Path $ProjectDir "scripts\start-fooocus.bat"
-Register-KoharuTask -Name "KoharuFooocus" `
-  -Execute $fooBat `
-  -WorkDir (Join-Path $ProjectDir "scripts") `
-  -LogonDelaySec 15
+# All via wscript + .vbs = no CMD window flash
 
-# 2) Website (Next.js on :8000) — optional local fallback
+# 1) Fooocus GPU UI (:7865) - required for live site image gen
+Register-KoharuTask -Name "KoharuFooocus" `
+  -Execute "wscript.exe" `
+  -Arguments "`"$ProjectDir\scripts\start-fooocus-hidden.vbs`"" `
+  -WorkDir (Join-Path $ProjectDir "scripts") `
+  -LogonDelaySec 15 `
+  -RepeatEvery5Min
+
+# 2) Media CDN (:8890)
+Register-KoharuTask -Name "KoharuMediaCDN" `
+  -Execute "wscript.exe" `
+  -Arguments "`"$ProjectDir\scripts\start-media-cdn-hidden.vbs`"" `
+  -WorkDir (Join-Path $ProjectDir "scripts") `
+  -LogonDelaySec 20 `
+  -RepeatEvery5Min
+
+# 3) Website local fallback (:8000)
 Register-KoharuTask -Name "KoharuWebApp" `
   -Execute "wscript.exe" `
   -Arguments "`"$ProjectDir\start-site-hidden.vbs`"" `
   -WorkDir $ProjectDir `
-  -LogonDelaySec 40
+  -LogonDelaySec 40 `
+  -RepeatEvery5Min
 
-# 3) Fooocus bridge (:8888) — after Fooocus has time to boot
-$bridgeBat = Join-Path $ProjectDir "scripts\start-fooocus-bridge.bat"
-Register-KoharuTask -Name "KoharuFooocusBridge" `
-  -Execute $bridgeBat `
-  -WorkDir (Join-Path $ProjectDir "scripts") `
-  -LogonDelaySec 90
-
-# 4) Media CDN (:8890) — multi-device vault files via tunnel
-$mediaBat = Join-Path $ProjectDir "scripts\start-media-cdn.bat"
-Register-KoharuTask -Name "KoharuMediaCDN" `
-  -Execute $mediaBat `
-  -WorkDir (Join-Path $ProjectDir "scripts") `
-  -LogonDelaySec 20
+# 4) Fooocus bridge (:8888) - site talks to this (every 2 min health check)
+Unregister-ScheduledTask -TaskName "KoharuFooocusBridge" -Confirm:$false -ErrorAction SilentlyContinue
+$bridgeAction = New-ScheduledTaskAction `
+  -Execute "powershell.exe" `
+  -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ProjectDir\scripts\ensure-fooocus-bridge.ps1`"" `
+  -WorkingDirectory (Join-Path $ProjectDir "scripts")
+$bridgeLogon = New-ScheduledTaskTrigger -AtLogOn -User $UserId
+$bridgeLogon.Delay = "PT90S"
+$bridgeRepeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+  -RepetitionInterval (New-TimeSpan -Minutes 2) `
+  -RepetitionDuration (New-TimeSpan -Days 3650)
+$bridgeSettings = New-ScheduledTaskSettingsSet `
+  -AllowStartIfOnBatteries `
+  -DontStopIfGoingOnBatteries `
+  -StartWhenAvailable `
+  -ExecutionTimeLimit (New-TimeSpan -Minutes 2) `
+  -MultipleInstances IgnoreNew
+$bridgePrincipal = New-ScheduledTaskPrincipal -UserId $UserId -LogonType Interactive -RunLevel Limited
+Register-ScheduledTask -TaskName "KoharuFooocusBridge" `
+  -Action $bridgeAction `
+  -Trigger @($bridgeLogon, $bridgeRepeat) `
+  -Settings $bridgeSettings `
+  -Principal $bridgePrincipal `
+  -Force | Out-Null
+Write-Host "Registered task: KoharuFooocusBridge (logon + every 2 min health/restart)"
 
 Write-Host ""
-Write-Host "Starting services..."
+Write-Host "Starting services (including Fooocus for site image gen)..."
 Start-ScheduledTask -TaskName "KoharuFooocus" -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 Start-ScheduledTask -TaskName "KoharuMediaCDN" -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName "KoharuWebApp" -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName "KoharuFooocusBridge" -ErrorAction SilentlyContinue
-Write-Host "Done. Tasks: KoharuFooocus, KoharuMediaCDN, KoharuWebApp, KoharuFooocusBridge"
+
+Write-Host ""
+Write-Host "Done."
+Write-Host "  - Fooocus stays up for the site (will restart if it crashes)"
+Write-Host "  - Bridge checked every 2 min (ensure-fooocus-bridge.ps1)"
+Write-Host "  - Logs: logs\bridge-watchdog.log"
+Write-Host "  - No visible CMD windows"
+Write-Host "  - Optional: scripts\stop-for-gaming.bat only if YOU choose to free the GPU"
+Write-Host ""
 Get-ScheduledTask -TaskName "KoharuFooocus","KoharuMediaCDN","KoharuWebApp","KoharuFooocusBridge" |
   Format-Table TaskName, State -AutoSize

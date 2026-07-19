@@ -29,6 +29,14 @@ ROOT = Path(
         str(Path(__file__).resolve().parent.parent / "media"),
     )
 ).resolve()
+
+VAULT_ROOT = Path(
+    os.environ.get(
+        "VAULT_ROOT",
+        "D:/koharu-server/vault",
+    )
+).resolve()
+
 PORT = int(os.environ.get("MEDIA_CDN_PORT", "8890"))
 SECRET = (
     os.environ.get("MEDIA_CDN_SECRET")
@@ -90,9 +98,23 @@ def build_index() -> dict:
     }
 
 
+# Public prefix when exposed under fooocus.thekoharuproject.com/media-cdn/*
+PUBLIC_PREFIX = "/media-cdn"
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
+
+    def _normalize_path(self):
+        """Strip /media-cdn prefix so tunnel path routing works without DNS."""
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+        if path == PUBLIC_PREFIX or path.startswith(PUBLIC_PREFIX + "/"):
+            rest = path[len(PUBLIC_PREFIX) :] or "/"
+            qs = f"?{parsed.query}" if parsed.query else ""
+            self.path = rest + qs
+        return urlparse(self.path)
 
     def end_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -109,8 +131,63 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_response(204)
         self.end_headers()
 
+    def _is_private_path(self, path: str) -> bool:
+        """Owner private media — never public without x-media-secret."""
+        p = path.lower().strip("/")
+        return (
+            p.startswith("_private/")
+            or p.startswith("private/")
+            or f"/{p}/".startswith("/_private/")
+            or p.startswith("vault/private/")
+        )
+
+    def _serve_file(self, fpath: Path):
+        """Serve a static file with optional range requests."""
+        import mimetypes
+        mime, _ = mimetypes.guess_type(str(fpath))
+        if not mime:
+            mime = "application/octet-stream"
+        try:
+            size = fpath.stat().st_size
+        except OSError:
+            self.send_error(404, "Not found")
+            return
+
+        range_header = self.headers.get("Range")
+        if range_header and range_header.startswith("bytes="):
+            try:
+                rangespec = range_header[6:]
+                start_str, end_str = rangespec.split("-", 1)
+                start = int(start_str) if start_str else 0
+                end = int(end_str) if end_str else size - 1
+                if start > end or start >= size:
+                    self.send_error(416, "Range Not Satisfiable")
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.end_headers()
+                    return
+                end = min(end, size - 1)
+                length = end - start + 1
+                self.send_response(206)
+                self.send_header("Content-Type", mime)
+                self.send_header("Content-Length", str(length))
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                self.end_headers()
+                with open(fpath, "rb") as f:
+                    f.seek(start)
+                    self.wfile.write(f.read(length))
+                return
+            except ValueError:
+                pass
+
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(size))
+        self.end_headers()
+        with open(fpath, "rb") as f:
+            self.wfile.write(f.read())
+
     def do_GET(self):
-        parsed = urlparse(self.path)
+        parsed = self._normalize_path()
         path = unquote(parsed.path)
         if path in ("/", "/health"):
             body = json.dumps(
@@ -123,7 +200,16 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
         if path == "/index.json":
-            body = json.dumps(build_index()).encode()
+            # Exclude private folders from public catalog
+            idx = build_index()
+            idx["items"] = [
+                it
+                for it in idx.get("items", [])
+                if not str(it.get("companionId", "")).startswith("_")
+                and str(it.get("companionId", "")).lower() != "private"
+            ]
+            idx["count"] = len(idx["items"])
+            body = json.dumps(idx).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -131,10 +217,117 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        # Owner private catalog — requires media secret (Vercel vault API uses this)
+        if path in ("/private-index.json", "/_private/index.json"):
+            secret = self.headers.get("x-media-secret") or ""
+            if not SECRET or secret != SECRET:
+                self.send_error(403, "Private index — forbidden")
+                return
+            items = []
+            priv = ROOT / "_private"
+            for kind, type_name in (("library", "photos"), ("videos", "videos")):
+                d = priv / kind
+                if not d.is_dir():
+                    continue
+                for f in sorted(d.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+                    if not f.is_file() or not is_media(f.name):
+                        continue
+                    st = f.stat()
+                    items.append(
+                        {
+                            "id": f"private:{type_name}:{f.name}",
+                            "companionId": "private",
+                            "kind": kind,
+                            "type": type_name,
+                            "mediaType": media_type(f.name),
+                            "name": f.name,
+                            "path": f"_private/{kind}/{f.name}",
+                            "size": st.st_size,
+                            "mtime": int(st.st_mtime * 1000),
+                        }
+                    )
+            body = json.dumps(
+                {"ok": True, "count": len(items), "items": items}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        # Vault index — lists free/plus/vip/private photos & videos
+        if path == "/vault-index.json":
+            secret = self.headers.get("x-media-secret") or ""
+            tiers_to_serve = ["free", "plus", "vip"]
+            if SECRET and secret == SECRET:
+                tiers_to_serve = ["free", "plus", "vip", "private"]
+            content = {}
+            for tier in tiers_to_serve:
+                tier_dir = VAULT_ROOT / tier
+                content[tier] = {"photos": [], "videos": []}
+                for type_name in ("photos", "videos"):
+                    d = tier_dir / type_name
+                    if not d.is_dir():
+                        continue
+                    for f in sorted(d.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+                        if not f.is_file() or not is_media(f.name):
+                            continue
+                        st = f.stat()
+                        content[tier][type_name].append(
+                            {
+                                "id": f"vault:{tier}:{type_name}:{f.name}",
+                                "name": f.name,
+                                "url": f"/vault/{tier}/{type_name}/{f.name}",
+                                "size": st.st_size,
+                                "mtime": int(st.st_mtime * 1000),
+                                "mediaType": media_type(f.name),
+                                "storage": "cdn",
+                            }
+                        )
+            body = json.dumps({"ok": True, "content": content}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        # Serve vault files: /vault/{tier}/{type}/{file}
+        vault_match = re.match(r"^/vault/(free|plus|vip|private)/(photos|videos)/(.+)$", path)
+        if vault_match:
+            tier, type_name, fname = vault_match.groups()
+            fname = unquote(fname)
+            # Private requires secret
+            if tier == "private":
+                secret = self.headers.get("x-media-secret") or ""
+                if not SECRET or secret != SECRET:
+                    self.send_error(403, "Private vault — forbidden")
+                    return
+            fpath = (VAULT_ROOT / tier / type_name / fname).resolve()
+            # Traversal check
+            vault_tier_dir = (VAULT_ROOT / tier).resolve()
+            if not str(fpath).startswith(str(vault_tier_dir)):
+                self.send_error(403, "Forbidden")
+                return
+            if not fpath.is_file() or not is_media(fpath.name):
+                self.send_error(404, "Not found")
+                return
+            # Serve static file from vault
+            self._serve_file(fpath)
+            return
+        # Block private media unless secret matches (site/server proxy only)
+        if self._is_private_path(path):
+            secret = self.headers.get("x-media-secret") or ""
+            if not SECRET or secret != SECRET:
+                self.send_error(403, "Private media — forbidden")
+                return
         return super().do_GET()
 
     def do_POST(self):
-        parsed = urlparse(self.path)
+        parsed = self._normalize_path()
         if parsed.path.rstrip("/") != "/v1/upload":
             self.send_error(404, "Not found")
             return
