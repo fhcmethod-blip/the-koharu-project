@@ -15,24 +15,29 @@
 /.next/
 /out/
 
-# production
+# build output
 /build
+build-out.txt
 
 # misc
 .DS_Store
 *.pem
 Thumbs.db
+NUL
 
-# debug
+# debug + logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (secrets)
+# env files (secrets — never commit)
 .env
-.env.*
-!.env.example
+.env.local
+.env.*.local
+.env.production
+cf-token.env
 
 # vercel
 .vercel
@@ -40,6 +45,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# dedicated image-gen bridge venv (do not deploy)
+/bridge-venv/
+
+# auth user store (local file mode)
+/data/
 
 # local runtime
 /logs/
@@ -49,10 +60,37 @@ next-env.d.ts
 /scripts/*.pyc
 /scripts/_genbody.json
 /scripts/_run_bridge.bat
-build-out.txt
-.vercel
-.env*
 
+# video workdirs
 scripts/_web_*.mp4
 scripts/*.mp4
+New folder/
 
+# cloudflare
+.wrangler/
+
+# test artifacts
+fal-test-result.json
+check-r2-config.sh
+
+# backups
+*.bak
+koharu/
+
+# windows junk
+fooocus-start.err
+fooocus-start.log
+fooocus-start.log.err
+
+# temp & test files (one-off, never commit)
+temp_create_prices.sh
+temp_price_ids.txt
+test-fal.mjs
+test-fal-nude.mjs
+test-file.txt
+test-r2-s3.js
+test-upload.txt
+upload-media-to-r2.js
+
+# env variants (never commit)
+.env.vercel-blob

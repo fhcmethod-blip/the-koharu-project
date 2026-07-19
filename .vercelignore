@@ -1,5 +1,11 @@
-﻿scripts/_web_*.mp4
-scripts/*.mp4
-media/**
-node_modules
-.next
+# Large video files
+**/*.mp4
+**/*.webm
+**/*.mkv
+
+# Specific directories
+New folder/
+.wrangler/
+
+# Cache and temp
+.next/cache
