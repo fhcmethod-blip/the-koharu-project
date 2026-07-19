@@ -45,7 +45,11 @@ Test:
 | `OPENROUTER_MODEL` | `nousresearch/hermes-3-llama-3.1-70b` |
 | `IMAGE_PROVIDER` | `fooocus` |
 | `FOOOCUS_API_URL` | `https://fooocus.thekoharuproject.com` |
-| `FOOOCUS_BRIDGE_SECRET` | (optional) long random string — also set on the PC bridge |
+| `NEXT_PUBLIC_FOOOCUS_API_URL` | `https://fooocus.thekoharuproject.com` |
+| `FOOOCUS_BRIDGE_SECRET` | **required** long random string — same on PC bridge |
+| `NEXT_PUBLIC_FOOOCUS_BRIDGE_SECRET` | **same string** (phones post jobs browser→tunnel) |
+
+Also set the same secret in project `.env.local` so `scripts/start-fooocus-bridge.bat` starts the bridge with `--secret`. Restart the bridge after changing the secret.
 
 Redeploy after saving env vars.
 
