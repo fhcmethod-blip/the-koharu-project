@@ -1,168 +1,20 @@
 /**
- * Visual presets for Fooocus companion image gen.
- * mode is sent to the bridge as model + styles + prompt flavor.
- *
- * Defaults: full explicit nude + sexual acts, varied camera angles.
- * "looking at viewer / selfie" only when the user asks for that.
+ * Image generation presets.
+ * Per-companion parameters live in companions/json/{id}.json → generation.
+ * MODE_CONFIG is the global fallback when a mode is forced without overrides.
  */
+import {
+  getCompanionFile,
+  getCompanionGeneration,
+} from "./companion-registry";
+import type { ImageMode } from "./companion-types";
 
-export type ImageMode = "lust" | "pony" | "realistic";
+export type { ImageMode };
 
 export type CompanionVisual = {
-  /** Extra visual tags for the character */
   look: string;
-  /** Prefer which checkpoint mode */
   preferredMode: ImageMode;
   gender: "female" | "male";
-};
-
-/**
- * Strong visual fingerprints for image gen — each companion must read as a
- * different person (hair, eyes, body, skin, fashion).
- */
-export const COMPANION_VISUALS: Record<string, CompanionVisual> = {
-  koharu: {
-    gender: "female",
-    preferredMode: "pony",
-    look: [
-      "1girl, solo, adult woman 22, anime style",
-      "long silky pastel pink hair, soft bangs, purple violet eyes",
-      "soft pretty girlfriend face, blush, gentle smile",
-      "slim curvy body, soft breasts, fair smooth skin, narrow waist",
-      "black ruffled crop top, black lace choker with pink gem, crystal earrings, fishnet sleeves when clothed",
-      "cute-sexy pink-haired beauty, NOT black hair, NOT blonde, NOT brown eyes",
-    ].join(", "),
-  },
-  mira: {
-    gender: "female",
-    preferredMode: "pony",
-    look: [
-      "1girl, solo, adult woman 28, elegant european-mixed features",
-      "sleek dark brown shoulder-length hair, often half-up, hazel-green eyes",
-      "defined cheekbones, poised confident face, expensive minimal makeup",
-      "tall lean hourglass, long legs, refined medium breasts, olive-fair skin",
-      "black silk, tailored, wine lipstick when made up",
-      "dominant elegance, NOT cute, NOT blonde, NOT freckled, NOT petite soft",
-    ].join(", "),
-  },
-  nova: {
-    gender: "female",
-    preferredMode: "pony",
-    look: [
-      "1girl, solo, adult woman 18, anime style, youthful young adult, cyberpunk",
-      "messy platinum blonde hair with neon pink and cyan streaks, glowing cyan tech eyes",
-      "bratty grin, freckles optional, soft youthful face no wrinkles",
-      "athletic slim body, toned, smaller athletic breasts, neon rim lighting",
-      "black crop top neon circuit pattern, ear cuffs, tech jewelry, night city vibe",
-      "cyberpunk street fashion, magenta purple neon bokeh",
-      "age 18 adult, NOT middle-aged, NOT 40, NOT elegant, NOT black hair classic goth, NOT soft romantic",
-    ].join(", "),
-  },
-  elena: {
-    gender: "female",
-    preferredMode: "pony",
-    look: [
-      "1girl, solo, adult woman 26",
-      "long wavy auburn chestnut hair, soft green-grey eyes, full lips, light freckles",
-      "gentle romantic face, soft expression",
-      "soft full figure, plush curves, generous breasts, warm ivory skin",
-      "linen blouse long skirt bookish sensual fashion",
-      "quiet heat, NOT jet black hair, NOT athletic blonde, NOT sharp goth",
-    ].join(", "),
-  },
-  raven: {
-    gender: "female",
-    preferredMode: "pony",
-    look: [
-      "1girl, solo, adult woman 27",
-      "straight jet-black hair sleek, pale cool skin, icy grey eyes, dark eyeliner",
-      "sharp seductive face, deep berry or black lipstick",
-      "tall slim, sharp shoulders, high small-medium breasts, long fingers",
-      "all-black leather sheer mesh silver rings expensive dark fashion",
-      "midnight edge, NOT blonde, NOT warm soft girlfriend, NOT freckled sunny",
-    ].join(", "),
-  },
-  yuki: {
-    gender: "female",
-    preferredMode: "pony",
-    look: [
-      "1girl, solo, adult woman 23, mature female, 18+",
-      "light ash-brown soft bob or half-up hair, large warm amber-brown eyes",
-      "round soft adult face, easy blush on cheeks, shy smile",
-      "petite short height, soft slim-curvy body, modest soft breasts, pale peach skin",
-      "pastel cardigan cute adult fashion, NOT loli, NOT childlike proportions",
-      "sweet melt, NOT black long hair koharu, NOT blonde nova, NOT goth raven",
-    ].join(", "),
-  },
-  // Male companions
-  kai: {
-    gender: "male",
-    preferredMode: "pony",
-    look: [
-      "1boy, solo, adult man 24, east asian male, anime style",
-      "messy black hair long on top, warm brown eyes, soft jaw light stubble",
-      "handsome boyfriend face, friendly hot",
-      "lean athletic body, toned arms, light fair-warm skin, male body",
-      "hoodie jeans simple chain when clothed",
-      "NOT woman, NOT feminine body, NOT blonde, NOT bulk bodybuilder",
-    ].join(", "),
-  },
-  cassian: {
-    gender: "male",
-    preferredMode: "pony",
-    look: [
-      "1boy, solo, adult man 31, anime style, handsome early thirties",
-      "short dark hair silver temples, steel-blue eyes, sharp jaw stubble",
-      "poised dominant male face, expensive calm",
-      "tall broad shoulders, lean muscular, defined chest, olive-fair skin",
-      "charcoal shirt black trousers watch",
-      "NOT woman, NOT pretty-boy soft, NOT blonde gym brat",
-    ].join(", "),
-  },
-  jax: {
-    gender: "male",
-    preferredMode: "pony",
-    look: [
-      "1boy, solo, adult man 25, anime style, youthful early twenties",
-      "tousled dirty-blonde hair, green eyes, cocky smirk, light freckles",
-      "athletic muscular male, strong arms chest, sun-kissed skin",
-      "tank top ripped jeans sneakers vibe",
-      "NOT woman, NOT black hair elegant, NOT pale goth",
-    ].join(", "),
-  },
-  theo: {
-    gender: "male",
-    preferredMode: "pony",
-    look: [
-      "1boy, solo, adult man 27, anime style",
-      "soft wavy brown hair, hazel eyes, optional glasses, gentle face",
-      "slim lean build, long fingers, warm ivory skin, light chest hair",
-      "flannel linen shirt romantic male",
-      "NOT woman, NOT bulk muscle, NOT jet-black dangerous look",
-    ].join(", "),
-  },
-  damon: {
-    gender: "male",
-    preferredMode: "pony",
-    look: [
-      "1boy, solo, adult man 29, anime style",
-      "black hair slicked back, pale cool skin, ice-grey eyes, sharp features",
-      "tall lean muscular V-torso, light dark chest hair",
-      "black shirt leather jacket silver rings",
-      "NOT woman, NOT golden boy, NOT soft freckled blonde",
-    ].join(", "),
-  },
-  ren: {
-    gender: "male",
-    preferredMode: "pony",
-    look: [
-      "1boy, solo, adult man 23, mature male, 18+",
-      "soft black messy hair, large dark eyes, easy blush, adult handsome face",
-      "slim soft-lean male body, smooth light skin, not hyper muscular",
-      "soft sweater neat shirt",
-      "NOT woman, NOT shota, NOT childlike, NOT underage",
-    ].join(", "),
-  },
 };
 
 export type ModeConfig = {
@@ -174,9 +26,31 @@ export type ModeConfig = {
   promptPrefix: string;
   negative: string;
   aspect: string;
+  seed?: number;
+  imageNumber?: number;
+  promptSuffix?: string;
 };
 
-/** Must match checkpoint filenames on disk */
+/** Built from companions/json for backwards-compatible imports */
+export const COMPANION_VISUALS: Record<string, CompanionVisual> = (() => {
+  const map: Record<string, CompanionVisual> = {};
+  // Lazy-filled on first access via getCompanionVisual
+  return map;
+})();
+
+export function getCompanionVisual(
+  companionId: string,
+): CompanionVisual | undefined {
+  const f = getCompanionFile(companionId);
+  if (!f) return undefined;
+  return {
+    look: f.generation.look,
+    preferredMode: f.generation.mode,
+    gender: f.gender,
+  };
+}
+
+/** Global mode fallbacks (forced anime / lust / realistic without companion override) */
 export const MODE_CONFIG: Record<ImageMode, ModeConfig> = {
   lust: {
     model: "bigLust_v16.safetensors",
@@ -190,21 +64,21 @@ export const MODE_CONFIG: Record<ImageMode, ModeConfig> = {
     cfg: 4,
     sharpness: 2.5,
     promptPrefix:
-      "nsfw, explicit, uncensored, erotic, pornographic, hardcore sex, adult woman 18+, raw photo quality, detailed genitals, detailed anatomy",
+      "nsfw, explicit, uncensored, erotic, pornographic, hardcore sex, adult 18-20 years old, raw photo quality, detailed genitals, detailed anatomy, photorealistic",
     negative:
-      "child, loli, shota, underage, young, teen, kid, toddler, looking at viewer, eye contact, selfie, phone selfie, front-facing camera, portrait selfie, worst quality, low quality, blurry, bad anatomy, bad hands, text, watermark, logo, censored, bar censor, mosaic censoring, deformed, ugly, extra fingers, cartoon, anime, clothed, lingerie only, covered nipples, covered pussy",
+      "child, loli, shota, underage, young teen, kid, toddler, anime, cartoon, looking at viewer, eye contact, selfie, worst quality, low quality, blurry, bad anatomy, text, watermark, censored, clothed",
     aspect: "896*1152",
   },
   pony: {
     model: "ponyDiffusionV6XL_v6StartWithThisOne (1).safetensors",
     styles: ["Fooocus Pony"],
-    performance: "Speed",
+    performance: "Quality",
     cfg: 7,
-    sharpness: 2,
+    sharpness: 2.2,
     promptPrefix:
-      "score_9, score_8_up, score_7_up, source_anime, rating_explicit, nsfw, explicit, uncensored, sexual, 1girl, adult woman, detailed pussy, detailed breasts",
+      "score_9, score_8_up, score_7_up, source_anime, rating_explicit, masterpiece, best quality, adult 18-20 years old, nsfw, explicit, uncensored",
     negative:
-      "score_6, score_5, score_4, child, loli, shota, underage, young, teen, kid, looking at viewer, eye contact, selfie, worst quality, low quality, blurry, bad anatomy, bad hands, text, watermark, censored, bar censor, mosaic censoring, clothed",
+      "score_6, score_5, score_4, child, loli, shota, underage, young, teen under 18, kid, looking at viewer, eye contact, selfie, worst quality, low quality, blurry, bad anatomy, censored, clothed",
     aspect: "896*1152",
   },
   realistic: {
@@ -215,18 +89,50 @@ export const MODE_CONFIG: Record<ImageMode, ModeConfig> = {
       "Fooocus Negative",
       "Fooocus Sharp",
     ],
-    performance: "Speed",
+    performance: "Quality",
     cfg: 4,
     sharpness: 2,
     promptPrefix:
-      "nsfw, photorealistic, explicit uncensored erotic photo, adult woman 18+, detailed skin, detailed genitals, natural lighting",
+      "nsfw, photorealistic, raw photo, explicit uncensored erotic, adult 18-20 years old, young adult, realistic skin pores, natural lighting, detailed skin, detailed genitals, 85mm lens",
     negative:
-      "child, loli, underage, young, teen, looking at viewer, eye contact, selfie, phone camera, cartoon, anime, manga, 3d render, plastic skin, worst quality, low quality, blurry, bad anatomy, text, watermark, censored, clothed",
+      "child, loli, shota, underage, minor, young teen, kid, toddler, looking at viewer, eye contact, selfie, cartoon, anime, manga, 3d render, plastic skin, middle-aged, elderly, wrinkles, worst quality, low quality, blurry, bad anatomy, text, watermark, censored, clothed",
     aspect: "896*1152",
   },
 };
 
-/** Female explicit scenes — NO forced eye contact / selfie framing */
+/** Merge companion JSON generation with mode base (companion wins). */
+export function getModeConfigForCompanion(
+  companionId: string,
+  mode: ImageMode,
+): ModeConfig {
+  const base = { ...MODE_CONFIG[mode] };
+  const gen = getCompanionGeneration(companionId);
+  if (!gen) return base;
+
+  // Only apply companion-specific knobs when using their preferred mode
+  // (or always apply look-related prefix/negative from companion)
+  const useFull = gen.mode === mode || mode === gen.mode;
+
+  if (useFull) {
+    return {
+      model: gen.model || base.model,
+      styles: gen.styles?.length ? gen.styles : base.styles,
+      performance: gen.performance || base.performance,
+      cfg: gen.cfg ?? base.cfg,
+      sharpness: gen.sharpness ?? base.sharpness,
+      promptPrefix: gen.promptPrefix || base.promptPrefix,
+      negative: gen.negative || base.negative,
+      aspect: gen.aspect || base.aspect,
+      seed: gen.seed,
+      imageNumber: gen.imageNumber ?? 1,
+      promptSuffix: gen.promptSuffix,
+    };
+  }
+
+  // Forced other mode: keep mode model/styles but companion look still applied in builder
+  return base;
+}
+
 const EXPLICIT_SCENES_F = [
   "fully nude, legs spread on bed, pussy visible, aroused, from above angle, eyes closed in pleasure",
   "fully nude, doggystyle pose on bed, ass and pussy visible from behind, arched back, face turned to side",
@@ -240,7 +146,6 @@ const EXPLICIT_SCENES_F = [
   "fully nude, sitting on edge of bed, thighs open, three-quarter side view, not looking at camera",
 ];
 
-/** Male explicit scenes */
 const EXPLICIT_SCENES_M = [
   "fully nude, adult man, hard cock, lying on bed, from side angle, eyes closed in pleasure",
   "fully nude, adult man, missionary sex with partner, side angle, muscular back, thrusting",
@@ -254,7 +159,6 @@ const EXPLICIT_SCENES_M = [
   "fully nude, adult man, handjob from partner, kissing neck, intimate side angle",
 ];
 
-/** Softer but still nude scenes if user is mild (rare) */
 const NUDE_POSE_SCENES = [
   "completely naked, lying on stomach on bed, from side, face in pillow, bare ass, soft light",
   "completely naked, kneeling on bed from side angle, hands on breasts, eyes closed, arched back",
@@ -265,19 +169,16 @@ const NUDE_POSE_SCENES = [
 function pickScene(pool: string[], seed: string): string {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  // mix in time so repeated "show" rotates
   h = (h + Math.floor(Date.now() / 30_000)) % pool.length;
   return pool[h];
 }
 
-/** User wants classic selfie / eye contact */
 function wantsSelfieFraming(text: string): boolean {
   return /\b(selfie|selfies|look(ing)? at (me|you|camera|viewer)|eye contact|facetime|front (facing|camera)|to the camera)\b/i.test(
     text,
   );
 }
 
-/** Map casual user words → explicit visual tags */
 function expandSexualActs(text: string): string {
   const t = text.toLowerCase();
   const tags: string[] = [];
@@ -342,6 +243,16 @@ function expandSexualActs(text: string): string {
   return tags.join(", ");
 }
 
+/** Optional client/creator overrides when companion is not on disk (custom-*) */
+export type ImageGenOverrides = {
+  look?: string;
+  appearance?: string;
+  gender?: "female" | "male";
+  profilePrompt?: string;
+  defaultScene?: string;
+  companionName?: string;
+};
+
 export function resolveImageMode(
   companionId: string,
   userText: string,
@@ -351,10 +262,21 @@ export function resolveImageMode(
     return forced;
   }
   const t = userText.toLowerCase();
-  if (/\b(pony|anime|manga|2d)\b/.test(t)) return "pony";
-  if (/\b(realistic|photo|photoreal|irl look)\b/.test(t)) return "realistic";
-  if (/\b(lust|filthy|hardcore|porn)\b/.test(t)) return "lust";
-  return COMPANION_VISUALS[companionId]?.preferredMode || "lust";
+  if (/\b(pony|anime|manga|2d|cartoon)\b/.test(t)) return "pony";
+  if (/\b(lust|filthy|hardcore|porn)\b/.test(t) && !/\b(realistic|photo)\b/.test(t))
+    return "lust";
+  if (/\b(realistic|photo|photoreal|irl look|real life)\b/.test(t))
+    return "realistic";
+
+  const envDefault = (process.env.FOOOCUS_DEFAULT_MODE || "").toLowerCase();
+  if (envDefault === "lust" || envDefault === "pony" || envDefault === "realistic") {
+    return envDefault;
+  }
+
+  const gen = getCompanionGeneration(companionId);
+  // Custom companions default to photoreal lust (women) / pony (handled by caller)
+  if (companionId.startsWith("custom-")) return "lust";
+  return gen?.mode || "realistic";
 }
 
 export function buildCompanionImagePrompt(opts: {
@@ -363,11 +285,17 @@ export function buildCompanionImagePrompt(opts: {
   appearance: string;
   userText: string;
   mode: ImageMode;
+  overrides?: ImageGenOverrides;
 }): { prompt: string; negative: string; config: ModeConfig } {
-  const config = MODE_CONFIG[opts.mode];
-  const visual = COMPANION_VISUALS[opts.companionId];
-  const gender = visual?.gender || "female";
+  const file = getCompanionFile(opts.companionId);
+  const gen = file?.generation;
+  const config = getModeConfigForCompanion(opts.companionId, opts.mode);
+  const o = opts.overrides;
+  const gender = o?.gender || file?.gender || "female";
   const isMale = gender === "male";
+  const appearance = (o?.appearance || opts.appearance || "").trim();
+  const profilePrompt = o?.profilePrompt || gen?.profilePrompt;
+  const defaultScene = o?.defaultScene || gen?.defaultScene;
   const raw = opts.userText || "";
   const selfie = wantsSelfieFraming(raw);
 
@@ -388,63 +316,74 @@ export function buildCompanionImagePrompt(opts: {
 
   const scenePool = isMale ? EXPLICIT_SCENES_M : EXPLICIT_SCENES_F;
 
-  if (bareRequest && !actTags) {
-    scene = pickScene(scenePool, `${opts.companionId}:${raw}`);
+  // Profile-style request → use companion profilePrompt
+  const wantsProfile =
+    /\b(profile|portrait|avatar|headshot|face pic|creator portrait)\b/i.test(raw) &&
+    !!profilePrompt;
+
+  if (wantsProfile && profilePrompt) {
+    scene = profilePrompt;
+  } else if (bareRequest && !actTags) {
+    scene =
+      defaultScene ||
+      pickScene(scenePool, `${opts.companionId}:${raw}`);
   } else if (bareRequest && actTags) {
     scene = actTags;
   } else {
     scene = [scene, actTags].filter(Boolean).join(", ");
-    if (!/\b(lingerie|clothed|dressed|outfit|cosplay only)\b/i.test(raw)) {
+    if (!/\b(lingerie|clothed|dressed|outfit|cosplay only|profile|portrait)\b/i.test(raw)) {
       scene = isMale
         ? `${scene}, fully nude male, explicit nsfw, uncensored, detailed male genitals, sexual`
         : `${scene}, fully nude, explicit nsfw, uncensored, detailed genitals, sexual`;
     }
   }
 
-  if (selfie) {
-    scene = `${scene}, selfie, looking at viewer, eye contact, front facing, phone camera perspective`;
-  } else {
-    scene = `${scene}, cinematic erotic angle, natural pose, averted gaze or eyes closed, not a selfie, not looking at camera`;
+  if (!wantsProfile) {
+    if (selfie) {
+      scene = `${scene}, selfie, looking at viewer, eye contact, front facing, phone camera perspective`;
+    } else {
+      scene = `${scene}, cinematic erotic angle, natural pose, averted gaze or eyes closed, not a selfie, not looking at camera`;
+    }
+
+    scene = isMale
+      ? `${scene}, completely naked man, bare chest, male abs or soft body, hard or soft cock, explicit sex, erotic, pornographic quality`
+      : `${scene}, completely naked, bare breasts, nipples, bare pussy, explicit sex, erotic, pornographic quality`;
   }
 
-  // Gender-specific nude polish
-  scene = isMale
-    ? `${scene}, completely naked man, bare chest, male abs or soft body, hard or soft cock, explicit sex, erotic, pornographic quality`
-    : `${scene}, completely naked, bare breasts, nipples, bare pussy, explicit sex, erotic, pornographic quality`;
-
   const look =
-    visual?.look ||
-    opts.appearance.replace(/\s+/g, " ").slice(0, 320) ||
-    (isMale ? "handsome adult man" : "beautiful adult woman");
-  const appearanceExtra = opts.appearance
-    ? opts.appearance.replace(/\s+/g, " ").slice(0, 220)
+    o?.look ||
+    gen?.look ||
+    appearance.replace(/\s+/g, " ").slice(0, 320) ||
+    (isMale ? "handsome adult man 18-20" : "beautiful adult woman 18-20");
+  const appearanceExtra = appearance
+    ? appearance.replace(/\s+/g, " ").slice(0, 220)
     : "";
 
   const genderTag = isMale
-    ? "1boy, solo, mature male, adult man 18+, distinct male character design"
-    : "1girl, solo, mature female, adult woman 18+, distinct character design";
+    ? "1boy, solo, adult man 18-20 years old, young adult male, distinct male character design"
+    : "1girl, solo, adult woman 18-20 years old, young adult female, distinct character design";
 
   const prompt = [
     config.promptPrefix,
-    opts.companionName,
+    o?.companionName || opts.companionName,
     genderTag,
     look,
     appearanceExtra,
     scene,
     "same character consistency, unique face for this companion only",
-    "masterpiece, best quality, detailed skin, detailed face, detailed body",
+    config.promptSuffix ||
+      "masterpiece, best quality, detailed skin, detailed face, detailed body, adult only 18+",
   ]
     .filter(Boolean)
     .join(", ");
 
   let negative = config.negative;
-  // Keep gender stable in negatives
   if (isMale) {
-    negative = `${negative}, 1girl, woman, female, feminine body, breasts, pussy, loli, shota, young boy, underage`;
+    negative = `${negative}, 1girl, woman, female, feminine body, breasts, pussy, loli, shota, young boy, underage, child`;
   } else {
-    negative = `${negative}, 1boy, man, male focus, penis, shota, underage`;
+    negative = `${negative}, 1boy, man, male focus, penis, shota, underage, child`;
   }
-  if (selfie) {
+  if (selfie || wantsProfile) {
     negative = negative
       .replace(/\s*looking at viewer\s*,?/gi, " ")
       .replace(/\s*eye contact\s*,?/gi, " ")
@@ -459,7 +398,54 @@ export function buildCompanionImagePrompt(opts: {
   return { prompt, negative, config };
 }
 
-/** Exported for tests / fallbacks */
+/** Build bridge POST body using companion JSON generation knobs */
+export function buildFooocusBridgeBody(opts: {
+  companionId: string;
+  companionName: string;
+  appearance: string;
+  userText: string;
+  mode?: ImageMode | null;
+  requireBase64?: boolean;
+  overrides?: ImageGenOverrides;
+}) {
+  const mode = resolveImageMode(
+    opts.companionId,
+    opts.userText,
+    opts.mode,
+  );
+  const built = buildCompanionImagePrompt({
+    companionId: opts.companionId,
+    companionName: opts.companionName,
+    appearance: opts.overrides?.appearance || opts.appearance,
+    userText: opts.userText,
+    mode,
+    overrides: opts.overrides,
+  });
+  const cfg = built.config;
+
+  return {
+    mode,
+    built,
+    bridgeBody: {
+      prompt: built.prompt,
+      negative_prompt: built.negative,
+      style_selections: cfg.styles,
+      performance_selection:
+        process.env.FOOOCUS_PERFORMANCE || cfg.performance,
+      aspect_ratios_selection: process.env.FOOOCUS_ASPECT || cfg.aspect,
+      image_number: cfg.imageNumber ?? 1,
+      image_seed: cfg.seed ?? -1,
+      sharpness: Number(process.env.FOOOCUS_SHARPNESS || cfg.sharpness),
+      guidance_scale: Number(process.env.FOOOCUS_GUIDANCE || cfg.cfg),
+      base_model_name: process.env.FOOOCUS_MODEL || cfg.model,
+      require_base64: opts.requireBase64 ?? false,
+      // Saved on disk to media/{companionId}/generated/
+      companion_id: opts.companionId,
+      companionId: opts.companionId,
+    },
+  };
+}
+
 export function defaultExplicitScene(seed = "show", male = false): string {
   return pickScene(male ? EXPLICIT_SCENES_M : EXPLICIT_SCENES_F, seed);
 }

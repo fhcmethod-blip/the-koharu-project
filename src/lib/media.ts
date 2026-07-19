@@ -269,3 +269,148 @@ export function formatBytes(n: number): string {
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
+
+// ─── Tier-Based Vault System ─────────────────────────────────────────────
+
+/** Vault root on AI drive (D:\koharu-server\vault) */
+export function vaultRoot(): string {
+  return process.env.VAULT_ROOT || "D:/koharu-server/vault";
+}
+
+export type VaultTierFolder = "free" | "plus" | "vip" | "private";
+
+/** Get vault directory for a tier and media type */
+export function vaultMediaDir(
+  tier: string,
+  type: "photos" | "videos",
+): string {
+  const safe_tier = sanitizeId(tier);
+  if (!["free", "plus", "vip", "private"].includes(safe_tier)) {
+    throw new Error(`Invalid tier: ${tier}`);
+  }
+  return path.join(vaultRoot(), safe_tier, type);
+}
+
+/** Ensure free/plus/vip/private photo+video folders exist (local PC). */
+export function ensureVaultDirs(): void {
+  try {
+    for (const tier of ["free", "plus", "vip", "private"] as const) {
+      for (const type of ["photos", "videos"] as const) {
+        const dir = vaultMediaDir(tier, type);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      }
+    }
+  } catch {
+    /* serverless / no D: drive — ignore */
+  }
+}
+
+/**
+ * Resolve a vault file path with traversal checks.
+ * Returns absolute path or null if invalid/missing.
+ */
+export function resolveVaultFilePath(
+  tier: string,
+  type: "photos" | "videos",
+  name: string,
+): string | null {
+  try {
+    const safeName = sanitizeFileName(name);
+    if (!isAllowedMedia(safeName)) return null;
+    const root = vaultMediaDir(tier, type);
+    const full = path.resolve(path.join(root, safeName));
+    const rootResolved = path.resolve(root);
+    if (!full.startsWith(rootResolved + path.sep) && full !== rootResolved) {
+      return null;
+    }
+    if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
+    return full;
+  } catch {
+    return null;
+  }
+}
+
+function listFilesFromDir(
+  dir: string,
+  tier: string,
+  type: "photos" | "videos",
+  sourceTag: string,
+): MediaFile[] {
+  if (!fs.existsSync(dir)) return [];
+  const kind: MediaKind = type === "photos" ? "library" : "videos";
+  const isPrivate = sanitizeId(tier) === "private";
+  const base = mediaPublicBase();
+
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isFile() && isAllowedMedia(d.name))
+    .map((d) => {
+      const full = path.join(dir, d.name);
+      const stat = fs.statSync(full);
+      // Private vault NEVER uses public CDN URLs — session-gated API only.
+      const url =
+        isPrivate || !base
+          ? `/api/vault/file?tier=${encodeURIComponent(tier)}&type=${encodeURIComponent(type)}&name=${encodeURIComponent(d.name)}`
+          : `${base}/vault/${tier}/${type}/${encodeURIComponent(d.name).replace(/%2F/g, "/")}`;
+
+      return {
+        id: `${sourceTag}-${tier}:${type}:${d.name}`,
+        companionId: tier,
+        kind,
+        mediaType: mediaTypeOf(d.name),
+        name: d.name,
+        url,
+        size: stat.size,
+        mtime: stat.mtimeMs,
+        storage: (isPrivate ? "disk" : base ? "cdn" : "disk") as "cdn" | "disk",
+      };
+    });
+}
+
+/** List media files from tier-based vault (+ optional media/_private mirror). */
+export function listVaultMedia(
+  tier: string,
+  type: "photos" | "videos",
+): MediaFile[] {
+  try {
+    ensureVaultDirs();
+    const safe = sanitizeId(tier);
+    const primary = listFilesFromDir(
+      vaultMediaDir(tier, type),
+      safe,
+      type,
+      "tier",
+    );
+
+    // Also read media/_private/{library|videos} for private vault (PC media root)
+    if (safe === "private") {
+      try {
+        const mirrorKind: MediaKind = type === "photos" ? "library" : "videos";
+        const mirrorDir = path.join(mediaRoot(), "_private", mirrorKind);
+        if (!fs.existsSync(mirrorDir)) {
+          fs.mkdirSync(mirrorDir, { recursive: true });
+        }
+        const mirror = listFilesFromDir(mirrorDir, "private", type, "media");
+        const seen = new Set(primary.map((f) => f.name.toLowerCase()));
+        for (const f of mirror) {
+          if (!seen.has(f.name.toLowerCase())) primary.push(f);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return primary.sort((a, b) => b.mtime - a.mtime);
+  } catch {
+    return [];
+  }
+}
+
+/** Check if user can access a tier's vault content (paid tiers only). */
+export function canAccessTierVault(
+  userTier: "free" | "plus" | "vip",
+  requestedTier: "free" | "plus" | "vip",
+): boolean {
+  const tierRank = { free: 0, plus: 1, vip: 2 };
+  return tierRank[userTier] >= tierRank[requestedTier];
+}

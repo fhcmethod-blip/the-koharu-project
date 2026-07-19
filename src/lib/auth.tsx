@@ -9,11 +9,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { isOwnerEmail, withOwnerAccess } from "./access";
+import { isOwnerEmail } from "./access";
 import type { MembershipTier, User } from "./types";
 
 const AGE_KEY = "kohar_age_ok";
-const USER_KEY = "kohar_user";
 
 type AuthContextValue = {
   ready: boolean;
@@ -21,24 +20,41 @@ type AuthContextValue = {
   user: User | null;
   isOwner: boolean;
   verifyAge: () => void;
-  signup: (email: string, displayName: string) => void;
-  login: (email: string) => void;
-  logout: () => void;
-  setTier: (tier: MembershipTier) => void;
-  grantFullAccess: () => void;
+  /** Create account with email + password (server-backed). */
+  signup: (
+    email: string,
+    displayName: string,
+    password: string,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /** Log in with email + password. */
+  login: (
+    email: string,
+    password: string,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  logout: () => Promise<void>;
+  /** Owner-only tier switch (server). */
+  setTier: (tier: MembershipTier) => Promise<void>;
+  refreshUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function loadUser(): User | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(USER_KEY);
-    if (!raw) return null;
-    return withOwnerAccess(JSON.parse(raw) as User);
-  } catch {
-    return null;
-  }
+function toUser(raw: {
+  id: string;
+  email: string;
+  displayName: string;
+  tier: MembershipTier;
+  ageVerified: boolean;
+  createdAt?: string;
+}): User {
+  return {
+    id: raw.id,
+    email: raw.email,
+    displayName: raw.displayName,
+    tier: isOwnerEmail(raw.email) ? "vip" : raw.tier,
+    ageVerified: raw.ageVerified,
+    createdAt: raw.createdAt || new Date().toISOString(),
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -46,34 +62,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ageVerified, setAgeVerified] = useState(false);
   const [user, setUser] = useState<User | null>(null);
 
-  useEffect(() => {
-    setAgeVerified(localStorage.getItem(AGE_KEY) === "1");
-    const u = loadUser();
-    setUser(u);
-    // Persist upgraded owner tier if needed
-    if (u && isOwnerEmail(u.email) && u.tier === "vip") {
-      localStorage.setItem(USER_KEY, JSON.stringify(u));
-      localStorage.setItem(AGE_KEY, "1");
-      setAgeVerified(true);
+  const refreshUser = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/me", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        user?: {
+          id: string;
+          email: string;
+          displayName: string;
+          tier: MembershipTier;
+          ageVerified: boolean;
+          createdAt?: string;
+        } | null;
+      };
+      if (data.user) {
+        const u = toUser(data.user);
+        setUser(u);
+        if (u.ageVerified) {
+          localStorage.setItem(AGE_KEY, "1");
+          setAgeVerified(true);
+        }
+      } else {
+        setUser(null);
+      }
+    } catch {
+      setUser(null);
     }
-    setReady(true);
   }, []);
 
-  const persistUser = useCallback((next: User | null) => {
-    const final = next ? withOwnerAccess(next) : null;
-    setUser(final);
-    if (final) {
-      localStorage.setItem(USER_KEY, JSON.stringify(final));
-      // Cookies so media API can gate <img>/<video> without custom headers
-      const maxAge = 60 * 60 * 24 * 365;
-      document.cookie = `kohar_tier=${final.tier}; path=/; max-age=${maxAge}; SameSite=Lax`;
-      document.cookie = `kohar_email=${encodeURIComponent(final.email)}; path=/; max-age=${maxAge}; SameSite=Lax`;
-    } else {
-      localStorage.removeItem(USER_KEY);
-      document.cookie = "kohar_tier=; path=/; max-age=0";
-      document.cookie = "kohar_email=; path=/; max-age=0";
-    }
-  }, []);
+  useEffect(() => {
+    setAgeVerified(localStorage.getItem(AGE_KEY) === "1");
+    void (async () => {
+      await refreshUser();
+      setReady(true);
+    })();
+  }, [refreshUser]);
 
   const verifyAge = useCallback(() => {
     localStorage.setItem(AGE_KEY, "1");
@@ -81,79 +107,128 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signup = useCallback(
-    (email: string, displayName: string) => {
-      const normalized = email.trim().toLowerCase();
-      const next: User = {
-        id: crypto.randomUUID(),
-        email: normalized,
-        displayName: displayName.trim() || "Member",
-        tier: isOwnerEmail(normalized) ? "vip" : "free",
-        ageVerified: true,
-        createdAt: new Date().toISOString(),
-      };
-      localStorage.setItem(AGE_KEY, "1");
-      setAgeVerified(true);
-      persistUser(next);
-    },
-    [persistUser],
-  );
-
-  const login = useCallback(
-    (email: string) => {
-      const normalized = email.trim().toLowerCase();
-      const existing = loadUser();
-      if (existing && existing.email === normalized) {
+    async (email: string, displayName: string, password: string) => {
+      try {
+        const res = await fetch("/api/auth/signup", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email,
+            displayName,
+            password,
+            ageConfirmed: true,
+          }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          user?: {
+            id: string;
+            email: string;
+            displayName: string;
+            tier: MembershipTier;
+            ageVerified: boolean;
+            createdAt?: string;
+          };
+        };
+        if (!res.ok || !data.user) {
+          return {
+            ok: false as const,
+            error: data.error || "Could not create account.",
+          };
+        }
         localStorage.setItem(AGE_KEY, "1");
         setAgeVerified(true);
-        persistUser(withOwnerAccess(existing));
-        return;
+        setUser(toUser(data.user));
+        return { ok: true as const };
+      } catch {
+        return {
+          ok: false as const,
+          error: "Network error. Please try again.",
+        };
       }
-      const next: User = {
-        id: existing?.id ?? crypto.randomUUID(),
-        email: normalized,
-        displayName:
-          existing?.displayName && existing.email === normalized
-            ? existing.displayName
-            : normalized.split("@")[0] || "Member",
-        tier: isOwnerEmail(normalized)
-          ? "vip"
-          : existing?.email === normalized
-            ? existing.tier
-            : "free",
-        ageVerified: true,
-        createdAt: existing?.createdAt ?? new Date().toISOString(),
+    },
+    [],
+  );
+
+  const login = useCallback(async (email: string, password: string) => {
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        user?: {
+          id: string;
+          email: string;
+          displayName: string;
+          tier: MembershipTier;
+          ageVerified: boolean;
+          createdAt?: string;
+        };
       };
+      if (!res.ok || !data.user) {
+        return {
+          ok: false as const,
+          error: data.error || "Invalid email or password.",
+        };
+      }
       localStorage.setItem(AGE_KEY, "1");
       setAgeVerified(true);
-      persistUser(next);
-    },
-    [persistUser],
-  );
+      setUser(toUser(data.user));
+      return { ok: true as const };
+    } catch {
+      return {
+        ok: false as const,
+        error: "Network error. Please try again.",
+      };
+    }
+  }, []);
 
-  const logout = useCallback(() => {
-    persistUser(null);
-  }, [persistUser]);
+  const logout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      /* ignore */
+    }
+    setUser(null);
+  }, []);
 
   const setTier = useCallback(
-    (tier: MembershipTier) => {
+    async (tier: MembershipTier) => {
       if (!user) return;
-      // Owners cannot be downgraded below VIP
-      if (isOwnerEmail(user.email) && tier !== "vip") {
-        persistUser({ ...user, tier: "vip" });
-        return;
+      try {
+        const res = await fetch("/api/auth/tier", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tier }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          user?: {
+            id: string;
+            email: string;
+            displayName: string;
+            tier: MembershipTier;
+            ageVerified: boolean;
+            createdAt?: string;
+          };
+        };
+        if (res.ok && data.user) {
+          setUser(toUser(data.user));
+        }
+      } catch {
+        /* ignore */
       }
-      persistUser({ ...user, tier });
     },
-    [persistUser, user],
+    [user],
   );
-
-  /** One-click full access for the logged-in session (owner/testing). */
-  const grantFullAccess = useCallback(() => {
-    if (!user) return;
-    localStorage.setItem(AGE_KEY, "1");
-    setAgeVerified(true);
-    persistUser({ ...user, tier: "vip", ageVerified: true });
-  }, [persistUser, user]);
 
   const isOwner = !!(user && isOwnerEmail(user.email));
 
@@ -168,7 +243,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       setTier,
-      grantFullAccess,
+      refreshUser,
     }),
     [
       ready,
@@ -180,7 +255,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       setTier,
-      grantFullAccess,
+      refreshUser,
     ],
   );
 

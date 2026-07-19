@@ -21,17 +21,29 @@ export type ImageJobStatus = {
   token?: string;
 };
 
+/** Filled from prepareOnly response when NEXT_PUBLIC secret missing from bundle. */
+let runtimeBridgeSecret = "";
+let runtimeBridgeBase = "";
+
 function publicFooocusBase(): string {
-  return (process.env.NEXT_PUBLIC_FOOOCUS_API_URL || "").replace(/\/$/, "");
+  return (
+    runtimeBridgeBase ||
+    process.env.NEXT_PUBLIC_FOOOCUS_API_URL ||
+    ""
+  ).replace(/\/$/, "");
 }
 
 function bridgeSecret(): string {
-  return process.env.NEXT_PUBLIC_FOOOCUS_BRIDGE_SECRET || "";
+  return (
+    runtimeBridgeSecret ||
+    process.env.NEXT_PUBLIC_FOOOCUS_BRIDGE_SECRET ||
+    ""
+  );
 }
 
 /** Secret in query string — avoids custom-header CORS preflight issues on mobile Safari. */
-function withSecret(url: string): string {
-  const secret = bridgeSecret();
+function withSecret(url: string, secretOverride?: string): string {
+  const secret = secretOverride || bridgeSecret();
   if (!secret) return url;
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}secret=${encodeURIComponent(secret)}`;
@@ -41,8 +53,9 @@ async function startJobDirect(
   bridgeBody: Record<string, unknown>,
   base: string,
   mode?: string,
+  secret?: string,
 ): Promise<ImageJobStatus> {
-  const url = withSecret(`${base}/v1/jobs`);
+  const url = withSecret(`${base}/v1/jobs`, secret);
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -70,73 +83,112 @@ async function startJobDirect(
   };
 }
 
+/** Overrides for custom companions / Creator (not on disk roster). */
+export type StartImageJobOpts = {
+  look?: string;
+  appearance?: string;
+  gender?: "female" | "male";
+  profilePrompt?: string;
+  companionName?: string;
+  mode?: "lust" | "pony" | "realistic";
+  defaultScene?: string;
+};
+
 /**
  * Mobile-first image jobs:
- * 1) Get full prompt from same-origin (prepareOnly — works even if Vercel→PC is blocked)
- * 2) Browser → public tunnel with secret in query (phones work; custom headers often fail)
- * 3) Fall back to full server job start if direct fails
+ * 1) Get full prompt + bridge secret from same-origin prepareOnly
+ * 2) Browser → public tunnel with secret in query
+ * 3) Fall back to server job start if direct fails
  */
 export async function startImageJob(
   companionId: string,
   prompt: string,
+  overrides?: StartImageJobOpts,
 ): Promise<ImageJobStatus> {
   const publicBase = publicFooocusBase();
+  const payload = {
+    companionId,
+    prompt,
+    ...(overrides || {}),
+  };
 
-  // Always get the built NSFW prompt from our API (same-origin — works on phones)
   const prepRes = await fetch("/api/image/jobs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ companionId, prompt, prepareOnly: true }),
+    body: JSON.stringify({ ...payload, prepareOnly: true }),
   });
   const prep = (await prepRes.json().catch(() => ({}))) as {
     bridgeBody?: Record<string, unknown>;
     mode?: string;
     publicBridgeUrl?: string;
+    bridgeSecret?: string;
     error?: string;
   };
 
-  const base = (prep.publicBridgeUrl || publicBase || "").replace(/\/$/, "");
-  const bridgeBody = prep.bridgeBody;
-
-  // Prefer browser → tunnel (PC and phone both use this when PC GPU is on)
-  if (base && bridgeBody && typeof window !== "undefined") {
-    try {
-      return await startJobDirect(bridgeBody, base, prep.mode);
-    } catch (directErr) {
-      console.warn("Direct bridge job failed, trying server:", directErr);
-    }
+  if (prep.bridgeSecret) runtimeBridgeSecret = prep.bridgeSecret;
+  if (prep.publicBridgeUrl) {
+    runtimeBridgeBase = prep.publicBridgeUrl.replace(/\/$/, "");
   }
 
-  // Server path (Vercel → home) — works if tunnel allows datacenter IPs
+  const base = (prep.publicBridgeUrl || publicBase || "").replace(/\/$/, "");
+  const bridgeBody = prep.bridgeBody;
+  const secret = prep.bridgeSecret || bridgeSecret();
+
+  if (base && bridgeBody && typeof window !== "undefined") {
+    // One automatic retry — bridge may have just been restarted by watchdog
+    let lastDirect: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        return await startJobDirect(bridgeBody, base, prep.mode, secret);
+      } catch (directErr) {
+        lastDirect = directErr;
+        console.warn(
+          `Direct bridge job failed (attempt ${attempt + 1}):`,
+          directErr,
+        );
+      }
+    }
+    console.warn("Direct bridge job failed, trying server:", lastDirect);
+  }
+
   const res = await fetch("/api/image/jobs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ companionId, prompt }),
+    body: JSON.stringify(payload),
   });
   const data = (await res.json().catch(() => ({}))) as ImageJobStatus & {
     error?: string;
     hint?: string;
     bridgeBody?: Record<string, unknown>;
     publicBridgeUrl?: string;
+    bridgeSecret?: string;
   };
+
+  if (data.bridgeSecret) runtimeBridgeSecret = data.bridgeSecret;
+  if (data.publicBridgeUrl) {
+    runtimeBridgeBase = data.publicBridgeUrl.replace(/\/$/, "");
+  }
 
   if (res.ok && data.id) return data;
 
-  // Last try: server returned bridgeBody on 502
   const fallbackBase = (data.publicBridgeUrl || base || "").replace(/\/$/, "");
+  const fallbackSecret = data.bridgeSecret || secret;
   if (fallbackBase && (data.bridgeBody || bridgeBody)) {
     return startJobDirect(
       data.bridgeBody || bridgeBody!,
       fallbackBase,
       data.mode || prep.mode,
+      fallbackSecret,
     );
   }
 
   throw new Error(
     data.error ||
       prep.error ||
-      data.hint ||
-      `Image job failed (${res.status}). On phone: keep PC awake with Fooocus + bridge.`,
+      "Photo generation is temporarily unavailable. Please try again in a moment.",
   );
 }
 
@@ -150,7 +202,6 @@ export async function waitForImageJob(
   const publicBase = publicFooocusBase();
 
   while (Date.now() - start < timeoutMs) {
-    // Prefer browser → public bridge (query secret — mobile-safe, no custom headers)
     if (publicBase && typeof window !== "undefined") {
       try {
         const pollUrl = withSecret(
@@ -165,6 +216,7 @@ export async function waitForImageJob(
           status?: string;
           error?: string;
           image_url?: string;
+          media_url?: string;
           token?: string;
         };
         if (!res.ok) throw new Error(data.error || `Poll failed (${res.status})`);
@@ -174,7 +226,10 @@ export async function waitForImageJob(
         if (data.status === "done") {
           const tok = data.token || opts?.token || "";
           let imageUrl: string | undefined;
-          if (data.image_url) {
+          // Prefer permanent media-cdn URL (file already on PC library)
+          if (data.media_url && /^https?:\/\//i.test(data.media_url)) {
+            imageUrl = data.media_url;
+          } else if (data.image_url) {
             imageUrl = data.image_url.startsWith("http")
               ? data.image_url
               : `${publicBase}${data.image_url.startsWith("/") ? "" : "/"}${data.image_url}`;
@@ -182,7 +237,6 @@ export async function waitForImageJob(
             imageUrl = `${publicBase}/v1/jobs/${encodeURIComponent(jobId)}/image?t=${encodeURIComponent(tok)}`;
           }
           if (imageUrl) {
-            // Keep external URL (small). Avoid data: URLs — they break mobile localStorage.
             return { ok: true, status: "done", imageUrl, id: jobId };
           }
         }
@@ -210,7 +264,7 @@ export async function waitForImageJob(
     }
     await new Promise((r) => setTimeout(r, 2500));
   }
-  throw new Error("Image generation timed out");
+  throw new Error("Photo is taking too long — try again.");
 }
 
 /**
@@ -222,7 +276,6 @@ export async function generateReply(
   userText: string,
   opts?: { skipImage?: boolean; preloadedImageUrl?: string },
 ): Promise<ChatReply> {
-  // Don't send huge data-URL images back to the server from phones
   let preloaded = opts?.preloadedImageUrl;
   if (preloaded && preloaded.startsWith("data:") && preloaded.length > 50_000) {
     preloaded = undefined;
@@ -235,7 +288,6 @@ export async function generateReply(
       character,
       history: history.map((m) => ({
         ...m,
-        // strip huge data URLs from history on mobile payloads
         imageUrl:
           m.imageUrl && m.imageUrl.startsWith("data:") && m.imageUrl.length > 8000
             ? undefined

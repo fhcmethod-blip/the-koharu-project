@@ -50,6 +50,12 @@ export type Character = {
   avatarUrl?: string;
   /** Optional wide cover image */
   coverUrl?: string;
+  /** Fooocus look tags (custom companions / creator) */
+  look?: string;
+  /** Preferred image mode for custom companions */
+  imageMode?: "lust" | "pony" | "realistic";
+  /** Profile portrait prompt for image gen */
+  profilePrompt?: string;
 };
 
 export type ChatMessage = {

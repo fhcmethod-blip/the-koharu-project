@@ -1,3 +1,5 @@
+export { type ImageMode } from "./image-presets";
+import { generateWithFal } from "./fal-image";
 import fs from "fs";
 import path from "path";
 import {
@@ -6,7 +8,7 @@ import {
   sanitizeId,
 } from "./media";
 import {
-  buildCompanionImagePrompt,
+  buildFooocusBridgeBody,
   resolveImageMode,
   type ImageMode,
 } from "./image-presets";
@@ -24,7 +26,7 @@ export type ImageGenResult = {
   error?: string;
   model?: string;
   mode?: ImageMode;
-  source?: "fooocus" | "pony" | "openrouter" | "library-fallback";
+  source?: "fooocus" | "pony" | "openrouter" | "library-fallback" | "fal";
 };
 
 type Provider = "fooocus" | "pony" | "openrouter";
@@ -85,13 +87,13 @@ function buildNsfwPrompt(opts: {
 
   const prompt = [
     process.env.FOOOCUS_PROMPT_PREFIX ||
-      "nsfw, explicit, uncensored, hardcore, erotic, adult woman, 18+",
+      "nsfw, photorealistic, raw photo, explicit, uncensored, hardcore, erotic, adult 18-20 years old, young adult, realistic skin pores, natural lighting",
     opts.companionName,
-    "1girl, mature female",
+    "1girl, adult woman 18-20, photoreal",
     opts.appearance.replace(/\s+/g, " ").slice(0, 280),
     user,
     process.env.FOOOCUS_PROMPT_SUFFIX ||
-      "highly detailed, beautiful face, realistic skin, detailed anatomy, pornographic",
+      "masterpiece, best quality, beautiful detailed face, realistic skin, detailed anatomy, 85mm lens, pornographic photo",
   ]
     .filter(Boolean)
     .join(", ");
@@ -100,8 +102,10 @@ function buildNsfwPrompt(opts: {
     process.env.FOOOCUS_NEGATIVE ||
     process.env.PONY_NEGATIVE ||
     [
-      "child, loli, shota, underage, young, kid, toddler, teen, little girl",
+      "child, loli, shota, underage, young, kid, toddler, teen under 18, little girl",
       "looking at viewer, eye contact, selfie, phone selfie, front-facing camera",
+      "cartoon, anime, manga, 3d render, plastic skin, illustration, painting",
+      "middle-aged, elderly, wrinkles",
       "worst quality, low quality, blurry, bad anatomy, bad hands",
       "text, watermark, logo, censored, bar censor, mosaic censoring",
       "clothed, lingerie only, covered nipples, covered pussy",
@@ -175,31 +179,18 @@ async function generateWithFooocus(opts: {
   mode?: ImageMode | null;
 }): Promise<ImageGenResult> {
   const base = fooocusBaseUrl();
-  const mode = resolveImageMode(opts.companionId, opts.userPrompt, opts.mode);
-  const built = buildCompanionImagePrompt({
+  const { mode, bridgeBody } = buildFooocusBridgeBody({
     companionId: opts.companionId,
     companionName: opts.companionName,
     appearance: opts.appearance,
     userText: opts.userPrompt,
-    mode,
+    mode: opts.mode,
+    requireBase64: true,
   });
-
   const body = {
-    prompt: built.prompt,
-    negative_prompt: built.negative,
-    style_selections: built.config.styles,
-    performance_selection:
-      process.env.FOOOCUS_PERFORMANCE || built.config.performance,
-    aspect_ratios_selection:
-      process.env.FOOOCUS_ASPECT || built.config.aspect,
-    image_number: 1,
-    image_seed: -1,
-    sharpness: Number(process.env.FOOOCUS_SHARPNESS || built.config.sharpness),
-    guidance_scale: Number(process.env.FOOOCUS_GUIDANCE || built.config.cfg),
-    base_model_name: process.env.FOOOCUS_MODEL || built.config.model,
+    ...bridgeBody,
     refiner_model_name: "None",
     async_process: false,
-    require_base64: true,
   };
 
   // Try several known endpoints
@@ -488,6 +479,10 @@ export async function generateCompanionImage(opts: {
   if (mode === "fooocus") {
     const r = await generateWithFooocus(opts);
     if (r.ok) return r;
+    // fal.ai fallback when local bridge is down (PC off)
+    const normalizedOpts = { ...opts, mode: opts.mode ?? undefined };
+    const falResult = await generateWithFal(normalizedOpts);
+    if (falResult.ok) return falResult;
     if (process.env.IMAGE_FALLBACK_OPENROUTER === "1") {
       const fb = await generateWithOpenRouter(opts);
       if (fb.ok) return fb;
