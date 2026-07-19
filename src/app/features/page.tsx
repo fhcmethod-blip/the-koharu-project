@@ -16,19 +16,19 @@ const features = [
   },
   {
     title: "Image moments in chat",
-    body: "Ask for a pic during chat. Mock images work now; connect image generation when you plug in your API.",
+    body: "Ask for a pic mid-chat. Get matching portraits and NSFW moments that stay in the conversation.",
   },
   {
-    title: "IRL vault (locked)",
+    title: "Companion Creator",
+    body: "Design your own 18+ companion with body sliders, generate a portrait, and chat — all in-app.",
+  },
+  {
+    title: "IRL vault",
     body: "A private library for real photos and videos. Free previews, Plus photo sets, VIP video access.",
   },
   {
     title: "Membership tiers",
-    body: "Free to explore chat. Upgrade for the vault — designed for subscription billing later.",
-  },
-  {
-    title: "Your domain, your brand",
-    body: "Built to deploy on Cloudflare Pages with your custom domain — DNS already in Cloudflare.",
+    body: "Free to explore chat. Upgrade when you’re ready for the full vault experience.",
   },
 ];
 

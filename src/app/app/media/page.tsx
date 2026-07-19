@@ -181,7 +181,7 @@ export default function MediaManagerPage() {
 
     // 2) Vercel Blob (when store is available)
     const { pathname } = vaultBlobPathname(companion, kind, file.name);
-    setUploadProgress(`Uploading to Vercel Blob: ${file.name}…`);
+    setUploadProgress(`Uploading ${file.name}…`);
     const result = await upload(pathname, file, {
       access: "public",
       handleUploadUrl: "/api/media/client-upload",
@@ -261,7 +261,7 @@ export default function MediaManagerPage() {
         } catch (e) {
           const msg = e instanceof Error ? e.message : "failed";
           errs.push(
-            `${file.name}: ${msg}. Is media CDN running (media.thekoharuproject.com)?`,
+            `${file.name}: upload failed. Please try again.`,
           );
         }
       }
@@ -345,10 +345,8 @@ export default function MediaManagerPage() {
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Media Manager</h1>
           <p className="prose-muted mt-1 text-sm">
-            Upload IRL photos &amp; videos to{" "}
-            <strong className="text-foreground/90">cloud storage</strong> (not
-            just this browser). They stay online and play on phones + PCs in the
-            vault. Use Account → <strong>VIP / full access</strong> before uploading.
+            Upload IRL photos &amp; videos for the vault. Files stay in your
+            library and play across your devices.
           </p>
           <Link
             href="/app/vault"
@@ -503,11 +501,7 @@ export default function MediaManagerPage() {
                     />
                   )}
                   <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white/90">
-                    {item.source === "local"
-                      ? "this device only"
-                      : item.url?.includes("blob.vercel-storage.com")
-                        ? "cloud ✓"
-                        : "server"}
+                    {item.source === "local" ? "local" : "library"}
                   </span>
                   <span className="absolute bottom-0 left-0 right-0 bg-black/65 px-2 py-1 text-[10px] text-white/90">
                     {formatBytes(item.size)}
@@ -547,11 +541,9 @@ export default function MediaManagerPage() {
               </p>
               <a
                 href={selected.url}
-                target="_blank"
-                rel="noreferrer"
                 className="btn-secondary !w-full !py-2 text-sm"
               >
-                Open original
+                View full size
               </a>
               <button
                 type="button"

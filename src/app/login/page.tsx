@@ -13,33 +13,61 @@ function LoginForm() {
   const params = useSearchParams();
   const next = params.get("next") || "/app";
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (ready && user) router.replace(next);
   }, [ready, user, router, next]);
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!email.trim()) return;
-    login(email);
+    if (!email.trim() || !password || busy) return;
+    setBusy(true);
+    setError(null);
+    const result = await login(email, password);
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
     router.push(next);
   }
 
   return (
     <form onSubmit={onSubmit} className="mt-8 space-y-4">
+      {error && (
+        <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+          {error}
+        </p>
+      )}
       <div>
         <label className="mb-1.5 block text-sm text-muted">Email</label>
         <input
           type="email"
           required
+          autoComplete="email"
           className="input-field"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@email.com"
         />
       </div>
-      <button type="submit" className="btn-primary w-full">
-        Log in
+      <div>
+        <label className="mb-1.5 block text-sm text-muted">Password</label>
+        <input
+          type="password"
+          required
+          autoComplete="current-password"
+          className="input-field"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Your password"
+        />
+      </div>
+      <button type="submit" className="btn-primary w-full" disabled={busy}>
+        {busy ? "Signing in…" : "Log in"}
       </button>
     </form>
   );
@@ -52,7 +80,7 @@ export default function LoginPage() {
       <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-4 py-16">
         <h1 className="text-3xl font-semibold tracking-tight">Welcome back</h1>
         <p className="prose-muted mt-2 text-sm">
-          Demo login — no password. Uses the account saved in this browser.
+          Log in with your email and password.
         </p>
         <Suspense fallback={<p className="mt-8 text-muted">Loading…</p>}>
           <LoginForm />
@@ -60,7 +88,7 @@ export default function LoginPage() {
         <p className="prose-muted mt-6 text-center text-sm">
           New here?{" "}
           <Link href="/signup" className="text-accent-soft hover:underline">
-            Sign up
+            Create an account
           </Link>
         </p>
       </main>

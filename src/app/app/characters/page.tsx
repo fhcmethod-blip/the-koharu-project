@@ -1,15 +1,26 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { CompanionCard } from "@/components/CompanionCard";
 import { companionTags, listCharacters } from "@/lib/characters";
+import {
+  customToCharacter,
+  loadCustomCompanions,
+  type SavedCustomCompanion,
+} from "@/lib/companion-creator";
 
 type GenderFilter = "all" | "female" | "male";
 
 export default function CharactersPage() {
   const [tag, setTag] = useState<string>("all");
   const [gender, setGender] = useState<GenderFilter>("all");
+  const [customs, setCustoms] = useState<SavedCustomCompanion[]>([]);
   const all = listCharacters();
+
+  useEffect(() => {
+    setCustoms(loadCustomCompanions());
+  }, []);
 
   const filtered = useMemo(() => {
     let list = all;
@@ -23,12 +34,19 @@ export default function CharactersPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-      <h1 className="text-3xl font-semibold tracking-tight">Companions</h1>
-      <p className="prose-muted mt-2 max-w-2xl text-sm">
-        <strong className="text-foreground">{girls} women</strong> and{" "}
-        <strong className="text-foreground">{guys} men</strong> — same 18+ playground.
-        Pick a vibe and start chatting.
-      </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Companions</h1>
+          <p className="prose-muted mt-2 max-w-2xl text-sm">
+            <strong className="text-foreground">{girls} women</strong> and{" "}
+            <strong className="text-foreground">{guys} men</strong> — same 18+
+            playground. Pick a vibe and start chatting.
+          </p>
+        </div>
+        <a href="/app/create" className="btn-primary text-sm">
+          + Create companion
+        </a>
+      </div>
 
       {/* Gender filters */}
       <div className="mt-6 flex flex-wrap gap-2">
@@ -82,6 +100,22 @@ export default function CharactersPage() {
           </button>
         ))}
       </div>
+
+      {customs.length > 0 && (
+        <section className="mt-8">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold">Your creations</h2>
+            <Link href="/app/create" className="text-xs text-accent-soft">
+              Create more
+            </Link>
+          </div>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            {customs.map((c) => (
+              <CompanionCard key={c.id} character={customToCharacter(c)} />
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2">
         {filtered.map((c) => (
