@@ -14,9 +14,17 @@ export default function SignupPage() {
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [grantCode, setGrantCode] = useState("");
   const [ageOk, setAgeOk] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const q = new URLSearchParams(window.location.search);
+    const c = q.get("code") || q.get("grant") || "";
+    if (c) setGrantCode(c.trim().toUpperCase());
+  }, []);
 
   useEffect(() => {
     if (ready && user) router.replace("/app");
@@ -41,11 +49,15 @@ export default function SignupPage() {
     }
 
     setBusy(true);
-    const result = await signup(email, name, password);
+    const result = await signup(email, name, password, grantCode || undefined);
     setBusy(false);
     if (!result.ok) {
       setError(result.error);
       return;
+    }
+    if (result.grantWarning) {
+      // Account exists; still enter app so they can fix code on Account
+      sessionStorage.setItem("kohar_grant_warning", result.grantWarning);
     }
     router.push("/app");
   }
@@ -58,7 +70,9 @@ export default function SignupPage() {
           Create account
         </h1>
         <p className="prose-muted mt-2 text-sm">
-          Free to start. Use a real email and a password you can remember.
+          {grantCode
+            ? "Access code detected — sign up to unlock your paid membership."
+            : "Free to start, or paste a Fansly access code for paid membership."}
         </p>
         <form onSubmit={onSubmit} className="mt-8 space-y-4">
           {error && (
@@ -66,6 +80,33 @@ export default function SignupPage() {
               {error}
             </p>
           )}
+          <div
+            className={
+              grantCode
+                ? "rounded-2xl border border-accent/40 bg-accent/10 p-4"
+                : ""
+            }
+          >
+            <label className="mb-1.5 block text-sm text-muted">
+              Access code{" "}
+              <span className="text-muted/70">(from Fansly DM)</span>
+            </label>
+            <input
+              className="input-field font-mono tracking-wider uppercase"
+              value={grantCode}
+              onChange={(e) =>
+                setGrantCode(e.target.value.toUpperCase().replace(/\s+/g, ""))
+              }
+              placeholder="KH-XXXX-XXXX"
+              autoComplete="off"
+              name="grantCode"
+              spellCheck={false}
+            />
+            <p className="prose-muted mt-1 text-xs">
+              Paste the code Rob sent you (starts with KH-). Unlocks paid site
+              access for 30 days. Leave blank for a free account.
+            </p>
+          </div>
           <div>
             <label className="mb-1.5 block text-sm text-muted">
               Display name
@@ -145,7 +186,11 @@ export default function SignupPage() {
             </span>
           </label>
           <button type="submit" className="btn-primary w-full" disabled={busy}>
-            {busy ? "Creating account…" : "Sign up free"}
+            {busy
+              ? "Creating account…"
+              : grantCode
+                ? "Sign up with access code"
+                : "Sign up free"}
           </button>
         </form>
         <p className="prose-muted mt-6 text-center text-sm">

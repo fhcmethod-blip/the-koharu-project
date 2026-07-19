@@ -20,12 +20,15 @@ type AuthContextValue = {
   user: User | null;
   isOwner: boolean;
   verifyAge: () => void;
-  /** Create account with email + password (server-backed). */
+  /** Create account with email + password (server-backed). Optional Fansly grant code. */
   signup: (
     email: string,
     displayName: string,
     password: string,
-  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+    grantCode?: string,
+  ) => Promise<
+    { ok: true; grantWarning?: string } | { ok: false; error: string }
+  >;
   /** Log in with email + password. */
   login: (
     email: string,
@@ -107,7 +110,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signup = useCallback(
-    async (email: string, displayName: string, password: string) => {
+    async (
+      email: string,
+      displayName: string,
+      password: string,
+      grantCode?: string,
+    ) => {
       try {
         const res = await fetch("/api/auth/signup", {
           method: "POST",
@@ -118,10 +126,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             displayName,
             password,
             ageConfirmed: true,
+            ...(grantCode?.trim() ? { grantCode: grantCode.trim() } : {}),
           }),
         });
         const data = (await res.json().catch(() => ({}))) as {
           error?: string;
+          grantWarning?: string;
           user?: {
             id: string;
             email: string;
@@ -140,7 +150,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(AGE_KEY, "1");
         setAgeVerified(true);
         setUser(toUser(data.user));
-        return { ok: true as const };
+        return {
+          ok: true as const,
+          ...(data.grantWarning ? { grantWarning: data.grantWarning } : {}),
+        };
       } catch {
         return {
           ok: false as const,

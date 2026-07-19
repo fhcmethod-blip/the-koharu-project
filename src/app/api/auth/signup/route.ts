@@ -9,7 +9,8 @@ import {
   publicFromStored,
   setSessionCookies,
 } from "@/lib/auth/session";
-import { createUser, findUserByEmail } from "@/lib/auth/user-store";
+import { createUser, findUserByEmail, findUserById } from "@/lib/auth/user-store";
+import { normalizeGrantCode, redeemGrantCode } from "@/lib/fansly-store";
 
 export const runtime = "nodejs";
 
@@ -20,11 +21,14 @@ export async function POST(req: NextRequest) {
       password?: string;
       displayName?: string;
       ageConfirmed?: boolean;
+      /** Admin-issued Fansly grant code e.g. KH-XXXX-XXXX */
+      grantCode?: string;
     };
 
     const email = (body.email || "").trim().toLowerCase();
     const password = body.password || "";
     const displayName = (body.displayName || "").trim();
+    const grantCode = normalizeGrantCode(body.grantCode || "");
 
     const emailErr = validateEmail(email);
     if (emailErr) {
@@ -57,9 +61,30 @@ export async function POST(req: NextRequest) {
       ageVerified: true,
     });
 
-    const token = await createSessionToken(user);
-    const publicUser = publicFromStored(user);
-    const res = NextResponse.json({ ok: true, user: publicUser });
+    let grantError: string | null = null;
+    if (grantCode) {
+      const redeemed = await redeemGrantCode({
+        code: grantCode,
+        userId: user.id,
+      });
+      if (!redeemed.ok) {
+        grantError = redeemed.error;
+      }
+    }
+
+    // Reload user so tier cookie matches grant
+    const fresh = (await findUserById(user.id)) ?? user;
+    const token = await createSessionToken(fresh);
+    const publicUser = publicFromStored(fresh);
+    const res = NextResponse.json({
+      ok: true,
+      user: publicUser,
+      ...(grantError
+        ? {
+            grantWarning: `Account created, but code failed: ${grantError}. Log in → Account to redeem a new code.`,
+          }
+        : {}),
+    });
     setSessionCookies(res, token, publicUser);
     return res;
   } catch (e) {

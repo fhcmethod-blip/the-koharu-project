@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isOwnerEmail } from "@/lib/access";
 import { getSessionFromCookies } from "@/lib/auth/session";
-import { approveCode, listPending, revokeCode } from "@/lib/fansly-store";
+import type { MembershipTier } from "@/lib/types";
+import {
+  approveCode,
+  issueGrantCode,
+  listIssued,
+  listPending,
+  revokeCode,
+} from "@/lib/fansly-store";
 
 export const runtime = "nodejs";
 
 /**
  * GET /api/fansly/admin
- * List pending Fansly codes waiting for approval (owner only).
+ * List pending fan-request codes + unredeemed admin-issued codes (owner only).
  */
 export async function GET() {
   try {
@@ -16,8 +23,8 @@ export async function GET() {
       return NextResponse.json({ error: "Not allowed." }, { status: 403 });
     }
 
-    const pending = await listPending();
-    return NextResponse.json({ ok: true, pending });
+    const [pending, issued] = await Promise.all([listPending(), listIssued()]);
+    return NextResponse.json({ ok: true, pending, issued });
   } catch (e) {
     console.error("fansly/admin/list", e instanceof Error ? e.message : e);
     return NextResponse.json({ error: "Could not load." }, { status: 500 });
@@ -26,8 +33,9 @@ export async function GET() {
 
 /**
  * POST /api/fansly/admin
- * Approve or revoke a code.
- * Body: { action: "approve" | "revoke", code: string }
+ * Body:
+ *  { action: "approve" | "revoke", code: string }
+ *  { action: "issue", tier: "plus" | "vip", fanslyUsername?: string }
  */
 export async function POST(req: NextRequest) {
   try {
@@ -36,10 +44,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Not allowed." }, { status: 403 });
     }
 
-    const body = (await req.json()) as { action?: string; code?: string };
-    const code = (body.code || "").trim().toUpperCase();
+    const body = (await req.json()) as {
+      action?: string;
+      code?: string;
+      tier?: string;
+      fanslyUsername?: string;
+    };
     const action = (body.action || "").toLowerCase();
 
+    if (action === "issue") {
+      const tier = (body.tier || "").toLowerCase() as MembershipTier;
+      const result = await issueGrantCode({
+        tier,
+        fanslyUsername: body.fanslyUsername,
+      });
+      if (!result.ok) {
+        return NextResponse.json({ error: result.error }, { status: 400 });
+      }
+      return NextResponse.json({ ok: true, verification: result.verification });
+    }
+
+    const code = (body.code || "").trim().toUpperCase();
     if (!code) {
       return NextResponse.json({ error: "Missing code." }, { status: 400 });
     }
@@ -64,7 +89,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: "Invalid action. Use 'approve' or 'revoke'." },
+      { error: "Invalid action. Use 'issue', 'approve', or 'revoke'." },
       { status: 400 },
     );
   } catch (e) {

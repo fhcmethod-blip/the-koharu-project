@@ -40,6 +40,9 @@ function AccountBody() {
   const [fanslyActiveTier, setFanslyActiveTier] = useState<MembershipTier | null>(null);
   const [fanslyBusy, setFanslyBusy] = useState(false);
   const [fanslyError, setFanslyError] = useState<string | null>(null);
+  const [redeemCode, setRedeemCode] = useState("");
+  const [redeemBusy, setRedeemBusy] = useState(false);
+  const [redeemError, setRedeemError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!upgraded) return;
@@ -69,6 +72,45 @@ function AccountBody() {
   const fanslyActive = fanslyVerifications.find(
     (v) => v.status === "approved" && new Date(v.expiresAt).getTime() > Date.now(),
   );
+
+  async function handleRedeemCode() {
+    setRedeemError(null);
+    setRedeemBusy(true);
+    try {
+      const res = await fetch("/api/fansly/redeem", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: redeemCode }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        setRedeemError(data.error || "Could not redeem code.");
+        setRedeemBusy(false);
+        return;
+      }
+      setRedeemCode("");
+      setNote(
+        `Fansly access activated: ${tierLabels[(data.tier as MembershipTier) || "plus"]}.`,
+      );
+      await refreshUser();
+      const s = await fetch("/api/fansly/status", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (s.ok) {
+        const sd = await s.json();
+        if (sd.ok) {
+          setFanslyVerifications(sd.verifications || []);
+          setFanslyActiveTier(sd.activeTier || null);
+        }
+      }
+    } catch {
+      setRedeemError("Network error.");
+    } finally {
+      setRedeemBusy(false);
+    }
+  }
 
   async function handleFanslyRequest() {
     setFanslyError(null);
@@ -245,6 +287,38 @@ function AccountBody() {
               </p>
             )}
           </div>
+
+          {/* Redeem admin-issued code from Fansly DM */}
+          {!fanslyActive && (
+            <div className="mt-3 rounded-xl border border-card-border bg-card/50 p-4">
+              <p className="text-sm font-medium text-foreground/90">
+                Have a code from Rob on Fansly?
+              </p>
+              <p className="prose-muted mt-1 text-xs">
+                Paste the KH- code they DMed you to unlock paid site access.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <input
+                  type="text"
+                  className="input font-mono tracking-wider uppercase flex-1 min-w-[10rem]"
+                  placeholder="KH-XXXX-XXXX"
+                  value={redeemCode}
+                  onChange={(e) => setRedeemCode(e.target.value.toUpperCase())}
+                />
+                <button
+                  type="button"
+                  className="btn-primary text-sm"
+                  disabled={redeemBusy || !redeemCode.trim()}
+                  onClick={() => void handleRedeemCode()}
+                >
+                  {redeemBusy ? "…" : "Redeem"}
+                </button>
+              </div>
+              {redeemError && (
+                <p className="mt-2 text-xs text-red-300">{redeemError}</p>
+              )}
+            </div>
+          )}
 
           {fanslyCode && (
             <div className="mt-3 rounded-xl border border-accent/30 bg-accent/10 p-4">

@@ -1,10 +1,11 @@
 /**
  * Fansly verification store
  *
- * Manages code-based Fansly subscription → site tier mapping.
- * - User requests a code (provides Fansly username + tier they purchased)
- * - Admin approves the code → grants site tier for 30 days
- * - On renewal, user requests a new code → grants another 30 days
+ * Two flows:
+ * A) Fan-request: user gets a code on site → DMs you → admin Approves
+ * B) Admin-issue: you create a code → DM fan on Fansly → they redeem on signup/account
+ *
+ * Both grant site tier for 30 days (CODE_TTL_MS).
  *
  * Postgres (Neon) when DATABASE_URL set, else JSON file fallback.
  */
@@ -25,11 +26,13 @@ export const PENDING_TTL_MS = 48 * 60 * 60 * 1000; // 48 hours
 
 export type FanslyVerification = {
   id: string;
+  /** Empty until an issued code is redeemed */
   userId: string;
   fanslyUsername: string;
   requestedTier: MembershipTier;
   code: string;
-  status: "pending" | "approved" | "expired" | "revoked";
+  /** issued = admin-created, waiting for fan to redeem */
+  status: "pending" | "issued" | "approved" | "expired" | "revoked";
   createdAt: string;
   expiresAt: string;
   approvedAt?: string | null;
@@ -73,8 +76,8 @@ async function ensurePgSchema() {
     await sql`
       CREATE TABLE IF NOT EXISTS fansly_verifications (
         id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        fansly_username TEXT NOT NULL,
+        user_id TEXT NOT NULL DEFAULT '',
+        fansly_username TEXT NOT NULL DEFAULT '',
         requested_tier TEXT NOT NULL,
         code TEXT UNIQUE NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
@@ -84,11 +87,36 @@ async function ensurePgSchema() {
         activated_tier TEXT
       )
     `;
+    // Allow empty user_id for admin-issued codes awaiting redeem
+    try {
+      await sql`ALTER TABLE fansly_verifications ALTER COLUMN user_id SET DEFAULT ''`;
+    } catch {
+      /* ignore */
+    }
     await sql`CREATE INDEX IF NOT EXISTS fansly_ver_user_idx ON fansly_verifications (user_id)`;
     await sql`CREATE INDEX IF NOT EXISTS fansly_ver_status_idx ON fansly_verifications (status)`;
     await sql`CREATE INDEX IF NOT EXISTS fansly_ver_code_idx ON fansly_verifications (code)`;
   })();
   return pgReady;
+}
+
+/** Upgrade user tier for a Fansly grant. Never downgrades VIP. */
+async function applyTierUpgrade(
+  userId: string,
+  requestedTier: MembershipTier,
+): Promise<void> {
+  if (!userId) return;
+  if (requestedTier !== "plus" && requestedTier !== "vip") return;
+  const { updateUserTier, findUserById } = await import("./auth/user-store");
+  const user = await findUserById(userId);
+  if (!user) return;
+  // Keep VIP; otherwise set to requested paid tier (free→plus/vip, plus→vip)
+  if (user.tier === "vip") return;
+  if (user.tier === requestedTier) return;
+  const rank = { free: 0, plus: 1, vip: 2 } as const;
+  if (rank[requestedTier] > rank[user.tier]) {
+    await updateUserTier(userId, requestedTier);
+  }
 }
 
 // --- JSON file fallback ---
@@ -458,6 +486,7 @@ export async function approveCode(params: {
   v.expiresAt = grantsUntil;
   v.activatedTier = v.requestedTier;
   await writeDb(db);
+  await applyTierUpgrade(v.userId, v.requestedTier);
   return { ok: true, verification: v };
 }
 
@@ -472,7 +501,7 @@ export async function revokeCode(params: {
     const rows = await sql`
       UPDATE fansly_verifications
       SET status = 'revoked'
-      WHERE code = ${params.code} AND status = 'approved'
+      WHERE code = ${params.code} AND status IN ('approved', 'issued')
       RETURNING *
     `;
     if (rows.length === 0) {
@@ -481,9 +510,230 @@ export async function revokeCode(params: {
     return { ok: true };
   }
   const db = await readDb();
-  const v = db.verifications.find((x) => x.code === params.code && x.status === "approved");
+  const v = db.verifications.find(
+    (x) =>
+      x.code === params.code &&
+      (x.status === "approved" || x.status === "issued"),
+  );
   if (!v) return { ok: false, error: "No active approval found." };
   v.status = "revoked";
   await writeDb(db);
   return { ok: true };
+}
+
+/** How long an admin-issued code can sit unused before it expires (ms). */
+export const ISSUED_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days to redeem
+
+/**
+ * Admin: create a grant code to DM on Fansly.
+ * Fan redeems it on signup or Account → gets tier for 30 days.
+ */
+export async function issueGrantCode(params: {
+  tier: MembershipTier;
+  fanslyUsername?: string;
+}): Promise<
+  | { ok: true; verification: FanslyVerification }
+  | { ok: false; error: string }
+> {
+  if (params.tier !== "plus" && params.tier !== "vip") {
+    return { ok: false, error: "Tier must be Plus or VIP." };
+  }
+
+  const now = nowUtc();
+  const id = crypto.randomUUID();
+  const code = makeCode();
+  const expiresAt = addMs(now, ISSUED_TTL_MS);
+  const fanslyUsername = (params.fanslyUsername || "").trim().toLowerCase();
+
+  if (usePostgres()) {
+    await ensurePgSchema();
+    const sql = await getSql();
+    if (!sql) return { ok: false, error: "DB connection failed." };
+
+    await sql`
+      INSERT INTO fansly_verifications
+        (id, user_id, fansly_username, requested_tier, code, status, created_at, expires_at)
+      VALUES
+        (${id}, ${""}, ${fanslyUsername}, ${params.tier}, ${code}, 'issued',
+         ${now}, ${expiresAt})
+    `;
+    const inserted = await sql`
+      SELECT * FROM fansly_verifications WHERE id = ${id}
+    `;
+    return { ok: true, verification: rowToVer(inserted[0]) };
+  }
+
+  const db = await readDb();
+  const ver: FanslyVerification = {
+    id,
+    userId: "",
+    fanslyUsername,
+    requestedTier: params.tier,
+    code,
+    status: "issued",
+    createdAt: now,
+    expiresAt,
+  };
+  db.verifications.push(ver);
+  await writeDb(db);
+  return { ok: true, verification: ver };
+}
+
+/** Admin: list unredeemed issued codes (not yet claimed by a user). */
+export async function listIssued(): Promise<FanslyVerification[]> {
+  const now = nowUtc();
+  if (usePostgres()) {
+    await ensurePgSchema();
+    const sql = await getSql();
+    if (!sql) return [];
+    await sql`
+      UPDATE fansly_verifications
+      SET status = 'expired'
+      WHERE status = 'issued' AND expires_at < ${now}
+    `;
+    const rows = await sql`
+      SELECT * FROM fansly_verifications
+      WHERE status = 'issued'
+      ORDER BY created_at DESC
+      LIMIT 50
+    `;
+    return rows.map(rowToVer);
+  }
+  const db = await readDb();
+  let dirty = false;
+  for (const v of db.verifications) {
+    if (v.status === "issued" && new Date(v.expiresAt) < new Date(now)) {
+      v.status = "expired";
+      dirty = true;
+    }
+  }
+  if (dirty) await writeDb(db);
+  return db.verifications
+    .filter((v) => v.status === "issued")
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    .slice(0, 50);
+}
+
+/** Normalize fan-typed codes: spaces stripped, uppercased, hyphens fixed. */
+export function normalizeGrantCode(raw: string): string {
+  let c = (raw || "").trim().toUpperCase().replace(/\s+/g, "");
+  // Allow KH3V925LXF → KH-3V92-5LXF
+  if (/^KH[A-Z0-9]{8}$/.test(c)) {
+    c = `KH-${c.slice(2, 6)}-${c.slice(6, 10)}`;
+  }
+  return c;
+}
+
+/**
+ * Fan redeems an admin-issued code (or any unused issued code).
+ * Binds to their account and grants tier for 30 days.
+ */
+export async function redeemGrantCode(params: {
+  code: string;
+  userId: string;
+}): Promise<
+  | { ok: true; verification: FanslyVerification; tier: MembershipTier }
+  | { ok: false; error: string }
+> {
+  const code = normalizeGrantCode(params.code);
+  const now = nowUtc();
+  const grantsUntil = addMs(now, CODE_TTL_MS);
+
+  if (!code) return { ok: false, error: "Enter a code." };
+  if (!params.userId) return { ok: false, error: "Not logged in." };
+
+  if (usePostgres()) {
+    await ensurePgSchema();
+    const sql = await getSql();
+    if (!sql) return { ok: false, error: "DB connection failed." };
+
+    const rows = await sql`
+      SELECT * FROM fansly_verifications
+      WHERE UPPER(TRIM(code)) = ${code}
+      LIMIT 1
+    `;
+    if (rows.length === 0) {
+      return { ok: false, error: "Code not found. Check and try again." };
+    }
+
+    const v = rowToVer(rows[0]);
+    if (v.status === "approved") {
+      return { ok: false, error: "This code was already used." };
+    }
+    if (v.status === "revoked" || v.status === "expired") {
+      return { ok: false, error: `Code is ${v.status}. Ask for a new one.` };
+    }
+    if (v.status === "pending") {
+      return {
+        ok: false,
+        error:
+          "That code is waiting for admin approval on Fansly, not a signup grant. DM it to @Rob if you haven’t.",
+      };
+    }
+    if (v.status !== "issued") {
+      return { ok: false, error: "Code cannot be redeemed." };
+    }
+    if (new Date(v.expiresAt) < new Date(now)) {
+      await sql`
+        UPDATE fansly_verifications SET status = 'expired' WHERE id = ${v.id}
+      `;
+      return { ok: false, error: "Code expired. Ask for a new one." };
+    }
+
+    await sql`
+      UPDATE fansly_verifications SET
+        status = 'approved',
+        user_id = ${params.userId},
+        approved_at = ${now},
+        expires_at = ${grantsUntil},
+        activated_tier = ${v.requestedTier}
+      WHERE id = ${v.id}
+    `;
+
+    await applyTierUpgrade(params.userId, v.requestedTier);
+
+    const updated = await sql`
+      SELECT * FROM fansly_verifications WHERE id = ${v.id}
+    `;
+    return {
+      ok: true,
+      verification: rowToVer(updated[0]),
+      tier: v.requestedTier,
+    };
+  }
+
+  // JSON fallback
+  const db = await readDb();
+  const v = db.verifications.find((x) => x.code === code);
+  if (!v) return { ok: false, error: "Code not found. Check and try again." };
+  if (v.status === "approved") {
+    return { ok: false, error: "This code was already used." };
+  }
+  if (v.status === "revoked" || v.status === "expired") {
+    return { ok: false, error: `Code is ${v.status}. Ask for a new one.` };
+  }
+  if (v.status === "pending") {
+    return {
+      ok: false,
+      error:
+        "That code is waiting for admin approval, not a signup grant. DM it to @Rob if you haven’t.",
+    };
+  }
+  if (v.status !== "issued") {
+    return { ok: false, error: "Code cannot be redeemed." };
+  }
+  if (new Date(v.expiresAt) < new Date(now)) {
+    v.status = "expired";
+    await writeDb(db);
+    return { ok: false, error: "Code expired. Ask for a new one." };
+  }
+
+  v.status = "approved";
+  v.userId = params.userId;
+  v.approvedAt = now;
+  v.expiresAt = grantsUntil;
+  v.activatedTier = v.requestedTier;
+  await writeDb(db);
+  await applyTierUpgrade(params.userId, v.requestedTier);
+  return { ok: true, verification: v, tier: v.requestedTier };
 }
