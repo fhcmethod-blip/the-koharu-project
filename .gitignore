@@ -94,3 +94,7 @@ upload-media-to-r2.js
 
 # env variants (never commit)
 .env.vercel-blob
+# one-off/internal scripts
+scripts/_*
+scripts/upload-to-r2.js
+wrangler.toml
