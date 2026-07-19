@@ -16,7 +16,6 @@ export function ChatWindow({ character }: { character: Character }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [statusLine, setStatusLine] = useState<string | null>(null);
-  const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [imageNote, setImageNote] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -36,13 +35,28 @@ export function ChatWindow({ character }: { character: Character }) {
       saveChat(character.id, [intro]);
     }
     setError(null);
-    setSource(null);
     setImageNote(null);
     setStatusLine(null);
   }, [character.id, character.greeting]);
 
+  // Only pin to bottom on new messages / typing — don't fight user scroll
+  const listRef = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = listRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottom.current = dist < 80;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!stickToBottom.current) return;
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, busy, statusLine]);
 
   async function send(text?: string) {
@@ -66,31 +80,42 @@ export function ChatWindow({ character }: { character: Character }) {
 
     try {
       let preloadedImageUrl: string | undefined;
-      let imageSourceNote: string | undefined;
 
-      // Async image path: avoids Cloudflare/Vercel killing long requests
+      // Async image path: long jobs poll outside the chat request
       if (wantsImage(content) && wantsGenerated(content)) {
-        setStatusLine(`${character.name} is generating a pic… (1–2 min)`);
+        setStatusLine(`${character.name} is sending a pic…`);
         try {
-          const job = await startImageJob(character.id, content);
-          if (!job.id) throw new Error("No job id from server");
+          const job = await startImageJob(character.id, content, {
+            look: character.look,
+            appearance: character.appearance,
+            gender: character.gender,
+            profilePrompt: character.profilePrompt,
+            companionName: character.name,
+            mode: character.imageMode,
+          });
+          if (!job.id) throw new Error("unavailable");
           const done = await waitForImageJob(job.id, {
             timeoutMs: 240_000,
             token: job.token,
-            onTick: (s) =>
-              setStatusLine(
-                `${character.name} is generating a pic… (${s || "working"})`,
-              ),
+            onTick: () =>
+              setStatusLine(`${character.name} is sending a pic…`),
           });
           preloadedImageUrl = done.imageUrl;
-          imageSourceNote = job.mode
-            ? `fooocus:${job.mode}`
-            : "fooocus";
           setStatusLine(`${character.name} is typing…`);
         } catch (imgErr) {
-          const msg =
-            imgErr instanceof Error ? imgErr.message : "Image gen failed";
-          setImageNote(`No image — ${msg}`);
+          const raw =
+            imgErr instanceof Error ? imgErr.message : "Photo unavailable";
+          // Keep product-safe but slightly more helpful
+          const soft =
+            /unauth|401|secret/i.test(raw)
+              ? "Photo service auth failed — gen stack may need a restart."
+              : /timeout|timed out/i.test(raw)
+                ? "Photo took too long — try again."
+                : /502|unreachable|fetch|network|Failed to fetch/i.test(raw)
+                  ? "Photo service offline — PC gen stack may be down."
+                  : "Photo unavailable right now — try again in a moment.";
+          setImageNote(soft);
+          console.warn("image gen failed:", raw);
           setStatusLine(`${character.name} is typing…`);
         }
       } else {
@@ -112,20 +137,14 @@ export function ChatWindow({ character }: { character: Character }) {
       const withReply = [...next, assistantMsg];
       setMessages(withReply);
       saveChat(character.id, withReply);
-      if (reply.source) setSource(reply.source);
 
       const finalImg = assistantMsg.imageUrl;
       if (finalImg) {
-        const src = reply.imageSource || imageSourceNote || "";
-        setImageNote(
-          src.startsWith("fooocus") || src === "generated"
-            ? `Image: Fooocus${src.includes(":") ? ` (${src.split(":")[1]})` : ""}`
-            : src === "library"
-              ? "Image: library"
-              : "Image attached",
-        );
+        setImageNote("Photo ready");
       } else if (reply.imageError) {
-        setImageNote(`No image — ${reply.imageError}`);
+        setImageNote(
+          "Photo unavailable right now — try again in a moment.",
+        );
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Chat failed";
@@ -157,27 +176,15 @@ export function ChatWindow({ character }: { character: Character }) {
     setMessages([intro]);
     saveChat(character.id, [intro]);
     setError(null);
-    setSource(null);
     setImageNote(null);
     setStatusLine(null);
   }
 
-  const sourceLabel =
-    source === "openrouter"
-      ? "Live AI (OpenRouter)"
-      : source === "xai"
-        ? "Live AI (xAI)"
-        : source === "local"
-          ? "Local LLM"
-          : source === "mock"
-            ? "Demo AI (rules on)"
-            : null;
-
   return (
-    <div className="flex h-[calc(100vh-0px)] min-h-[520px] flex-col md:h-screen">
-      <div className="flex items-center justify-between border-b border-card-border px-4 py-3 sm:px-6">
-        <div className="flex items-center gap-3">
-          <div className="relative h-11 w-11 overflow-hidden rounded-2xl border border-white/10 bg-black/30">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-card-border px-3 py-2.5 sm:px-6 sm:py-3">
+        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+          <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-black/30 sm:h-11 sm:w-11">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={character.avatarUrl || `/companions/${character.id}.jpg`}
@@ -185,34 +192,40 @@ export function ChatWindow({ character }: { character: Character }) {
               className="h-full w-full object-cover object-top"
             />
           </div>
-          <div>
-            <h1 className="font-semibold leading-tight">{character.name}</h1>
-            <p className="text-xs text-muted">{character.tagline}</p>
+          <div className="min-w-0">
+            <h1 className="truncate font-semibold leading-tight">
+              {character.name}
+            </h1>
+            <p className="truncate text-xs text-muted">{character.tagline}</p>
           </div>
         </div>
         <button
           type="button"
           onClick={reset}
-          className="text-xs text-muted hover:text-foreground"
+          className="min-h-11 shrink-0 px-2 text-xs text-muted hover:text-foreground"
         >
-          Reset chat
+          Reset
         </button>
       </div>
 
-      <div className="scrollbar-thin flex-1 space-y-4 overflow-y-auto px-4 py-6 sm:px-6">
+      <div
+        ref={listRef}
+        className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 py-4 sm:space-y-4 sm:px-6 sm:py-6"
+        style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+      >
         {messages.map((m) => (
           <div
             key={m.id}
             className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-[min(100%,28rem)] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+              className={`max-w-[min(100%,22rem)] rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed sm:max-w-[min(100%,28rem)] sm:px-4 sm:py-3 sm:text-sm ${
                 m.role === "user"
                   ? "rounded-br-md bg-accent text-white"
                   : "rounded-bl-md border border-card-border bg-card"
               }`}
             >
-              <p className="whitespace-pre-wrap">{m.content}</p>
+              <p className="whitespace-pre-wrap break-words">{m.content}</p>
               {m.imageUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -221,7 +234,7 @@ export function ChatWindow({ character }: { character: Character }) {
                   loading="eager"
                   decoding="async"
                   referrerPolicy="no-referrer"
-                  className="mt-3 h-auto max-h-[70vh] w-full rounded-xl object-contain bg-black/30"
+                  className="mt-3 h-auto max-h-[55dvh] w-full rounded-xl bg-black/30 object-contain sm:max-h-[70vh]"
                   onError={(e) => {
                     const el = e.currentTarget;
                     el.style.display = "none";
@@ -241,36 +254,40 @@ export function ChatWindow({ character }: { character: Character }) {
         <div ref={bottomRef} />
       </div>
 
-      <div className="border-t border-card-border p-4 sm:px-6">
+      <div className="safe-bottom shrink-0 border-t border-card-border bg-background/95 p-3 backdrop-blur-md sm:px-6 sm:py-4">
         <form
-          className="flex gap-2"
+          className="flex items-end gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             void send();
           }}
         >
           <input
-            className="input-field"
+            className="input-field min-h-11"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={`Message ${character.name}… (try “show”)`}
+            placeholder={`Message ${character.name}…`}
             disabled={busy}
             autoComplete="off"
+            enterKeyHint="send"
+            inputMode="text"
           />
           <button
             type="submit"
-            className="btn-primary shrink-0 !px-5"
+            className="btn-primary min-h-11 shrink-0 !px-5"
             disabled={busy || !input.trim()}
           >
             Send
           </button>
         </form>
-        <p className="prose-muted mt-2 text-center text-[11px]">
+        <p className="prose-muted mt-2 text-center text-[11px] leading-snug">
           {error ? (
-            <span className="text-accent-soft">{error}</span>
+            <span className="text-accent-soft">
+              Connection hiccup — try again.
+            </span>
           ) : (
             <>
-              {sourceLabel ? `${sourceLabel} · rules on` : "18+ companion chat"}
+              18+ private chat
               {imageNote ? ` · ${imageNote}` : ""}
             </>
           )}

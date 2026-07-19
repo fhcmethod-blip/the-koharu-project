@@ -2,15 +2,20 @@
 
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
-import { canAccess, tierLabels, vaultItems } from "@/lib/vault";
+import {
+  canAccess,
+  tierLabels,
+  vaultItems,
+} from "@/lib/vault";
+import type { MembershipTier, VaultItem } from "@/lib/types";
 
 export function VaultGrid() {
   const { user } = useAuth();
-  const tier = user?.tier ?? "free";
+  const tier: MembershipTier = user?.tier ?? "free";
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {vaultItems.map((item) => {
+      {vaultItems.map((item: VaultItem) => {
         const unlocked = canAccess(tier, item.tierRequired);
         return (
           <Link

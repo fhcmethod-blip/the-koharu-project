@@ -80,11 +80,8 @@ export function VaultVideo({
           <p className="font-medium">Playback issue</p>
           <p className="mt-1 opacity-90">{hint}</p>
           <p className="mt-2 opacity-80">
-            On your PC run{" "}
-            <code className="text-accent-soft">
-              scripts\convert-video-for-web.bat yourfile.mp4
-            </code>{" "}
-            then re-upload the new <code className="text-accent-soft">*-web.mp4</code>.
+            Try another device or open the file again. If it keeps failing,
+            re-upload as a standard phone-friendly MP4.
           </p>
         </div>
       )}

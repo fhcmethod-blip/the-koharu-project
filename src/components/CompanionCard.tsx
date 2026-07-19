@@ -10,6 +10,7 @@ export function CompanionCard({
   featured?: boolean;
 }) {
   const avatar = character.avatarUrl || `/companions/${character.id}.jpg`;
+  const isRemoteAvatar = /^https?:\/\//i.test(avatar);
 
   return (
     <article
@@ -26,14 +27,28 @@ export function CompanionCard({
             featured ? "min-h-[280px] sm:min-h-full" : "aspect-[4/5] sm:aspect-[3/4]"
           }`}
         >
-          <Image
-            src={avatar}
-            alt={character.name}
-            fill
-            className="object-cover object-top transition duration-500 group-hover:scale-[1.03]"
-            sizes={featured ? "(max-width: 640px) 100vw, 280px" : "(max-width: 640px) 100vw, 50vw"}
-            priority={!!character.isFeatured}
-          />
+          {isRemoteAvatar ? (
+            // Cloud / bridge URLs — skip Next optimizer domain allowlist
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={avatar}
+              alt={character.name}
+              className="absolute inset-0 h-full w-full object-cover object-top transition duration-500 group-hover:scale-[1.03]"
+            />
+          ) : (
+            <Image
+              src={avatar}
+              alt={character.name}
+              fill
+              className="object-cover object-top transition duration-500 group-hover:scale-[1.03]"
+              sizes={
+                featured
+                  ? "(max-width: 640px) 100vw, 280px"
+                  : "(max-width: 640px) 100vw, 50vw"
+              }
+              priority={!!character.isFeatured}
+            />
+          )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 p-4 sm:hidden">
             <h2 className="text-xl font-semibold text-white">{character.name}</h2>
@@ -94,18 +109,22 @@ export function CompanionCard({
             </div>
           </div>
 
-          <div className="mt-6 flex flex-wrap gap-3">
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
             <Link
               href={`/app/chat/${character.id}`}
-              className="btn-primary !py-2.5 text-sm"
+              className="btn-primary w-full !py-3 text-center text-sm sm:w-auto sm:!py-2.5"
             >
               Chat with {character.name}
             </Link>
             <Link
-              href={`/app/companions/${character.id}`}
-              className="btn-secondary !py-2.5 text-sm"
+              href={
+                character.id.startsWith("custom-")
+                  ? "/app/create"
+                  : `/app/companions/${character.id}`
+              }
+              className="btn-secondary w-full !py-3 text-center text-sm sm:w-auto sm:!py-2.5"
             >
-              Full profile
+              {character.id.startsWith("custom-") ? "Edit look" : "Full profile"}
             </Link>
           </div>
         </div>
