@@ -1,0 +1,11 @@
+{
+  "name": "The Koharu Project",
+  "short_name": "Koharu",
+  "description": "18+ NSFW AI companions and IRL vault",
+  "start_url": "/app",
+  "display": "standalone",
+  "background_color": "#07060a",
+  "theme_color": "#07060a",
+  "orientation": "portrait-primary",
+  "lang": "en"
+}

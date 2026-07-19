@@ -1,0 +1,18 @@
+{
+  "description": "Each companion has companions/json/{id}.json — full profile + generation params for Fooocus.",
+  "companions": [
+    "koharu",
+    "alina",
+    "mira",
+    "nova",
+    "elena",
+    "raven",
+    "yuki",
+    "kai",
+    "cassian",
+    "jax",
+    "theo",
+    "damon",
+    "ren"
+  ]
+}
